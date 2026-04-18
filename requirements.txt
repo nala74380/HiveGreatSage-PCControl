@@ -1,0 +1,4 @@
+# Python 依赖
+# 按需添加，例如：
+# PySide6>=6.6.0
+# requests

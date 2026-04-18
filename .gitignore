@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+logs/
+config/local.yaml
+dist/
+build/
+*.exe
