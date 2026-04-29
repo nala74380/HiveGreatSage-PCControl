@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 logs/
 config/local.yaml
+config/device_id.txt
 dist/
 build/
 *.exe
+*.lrj
+.env
+tools/adb/platform-tools/

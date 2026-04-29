@@ -143,6 +143,14 @@ class AdbManager:
         except FileNotFoundError:
             logger.error("找不到 adb.exe: %s", self._adb)
             return AdbResult(False, -1, "", "adb not found")
+        except OSError as e:
+            # WinError 193: 文件存在但不是有效的 Win32 可执行程序（占位文件 / 损坏文件）
+            logger.error(
+                "adb.exe 无法执行 (OSError %s): %s — 请重新下载 platform-tools",
+                getattr(e, 'winerror', ''),
+                e.strerror,
+            )
+            return AdbResult(False, -1, "", f"adb exec error: {e}")
 
     def _device_args(self, serial: str) -> list[str]:
         """生成 -s <serial> 参数，serial 为空时省略（操作唯一已连接设备）。"""

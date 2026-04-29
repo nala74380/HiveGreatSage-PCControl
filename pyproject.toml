@@ -4,4 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hivegreatsage-pccontrol"
-version = "0.1.0"
+version = "1.0.0"
+description = "蜂巢·大圣 PC 中控框架基座"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.7.0",
+    "httpx>=0.27.0",
+    "PyYAML>=6.0.1",
+    "keyring>=25.2.0",
+    "cryptography>=42.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

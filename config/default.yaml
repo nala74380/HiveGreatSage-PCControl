@@ -1,1 +1,52 @@
-# 框架默认配置
+# ============================================================
+# 文件位置: config/default.yaml
+# 名称: 默认配置文件
+# 作者: 蜂巢·大圣 (Hive-GreatSage)
+# 时间: 2026-04-27
+# 版本: V1.0.0
+# 功能及相关说明:
+#   PC 中控框架的默认配置。
+#   本地覆盖项写在 config/local.yaml，该文件已 .gitignore。
+#
+# 改进内容:
+#   V1.0.0 - 初始版本
+#
+# 调试信息:
+#   已知问题: 无
+# ============================================================
+
+server:
+  api_base_url: "https://api.example.com"   # local.yaml 中覆盖为实际地址（⚠️ 用 127.0.0.1，不要用 localhost）
+  port: 443                                  # local.yaml 开发时覆盖为 8000
+  project_uuid: ""                           # 必须在 local.yaml 中填写
+  timeout: 15
+  max_retries: 3
+
+sync:
+  interval: 10          # 设备状态拉取间隔（秒）
+  max_interval: 60
+
+ui:
+  theme: "dark"
+  language: "zh_CN"
+  main_window_width: 1800
+  main_window_height: 1200
+  login_window_width: 360
+  login_window_height: 300
+
+adb:
+  default_tcpip_port: 5555
+  command_timeout: 10
+
+team:
+  ws_port: 8889
+  ws_fallback_port: 8890
+
+update:
+  check_on_startup: true
+  auto_download: false
+
+log:
+  level: "INFO"
+  max_file_size_mb: 10
+  max_files: 5

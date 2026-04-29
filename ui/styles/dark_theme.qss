@@ -1,1 +1,150 @@
-/* 全局深色主题样式表 */
+/* ============================================================
+   文件位置: ui/styles/dark_theme.qss
+   名称: 全局深色主题样式表
+   作者: 蜂巢·大圣 (Hive-GreatSage)
+   时间: 2026-04-27
+   版本: V1.0.0
+   功能及相关说明:
+     PC 中控全局 QSS 深色主题。
+     通过 app.setStyleSheet(open("ui/styles/dark_theme.qss").read())
+     或直接嵌入 MAIN_QSS 字符串使用。
+     颜色定义与 ui/styles/colors.py 保持同步。
+   ============================================================ */
+
+/* ── 根容器 ── */
+QMainWindow, QWidget {
+    background: #0e0e0c;
+    font-family: 'Consolas', 'Source Code Pro', monospace;
+    font-size: 11px;
+    color: #c8c7c0;
+}
+
+/* ── 具名区域 ── */
+QWidget#topbar    { background: #111110; border-bottom: 1px solid #1e1e1c; }
+QWidget#sidebar   { background: #111110; border-right:  1px solid #1e1e1c; }
+QWidget#statusbar { background: #080806; border-top:    1px solid #111110; }
+QWidget#toolbar, QWidget#filterbar {
+    background: #111110;
+    border-bottom: 1px solid #1e1e1c;
+}
+
+/* ── 按钮 ── */
+QPushButton {
+    background: transparent;
+    border: 0.5px solid #2a2a28;
+    border-radius: 5px;
+    color: #888780;
+    padding: 3px 9px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+}
+QPushButton:hover    { background: #1a1a18; color: #c8c7c0; }
+QPushButton:disabled { color: #444441; }
+
+/* ── 导航按钮 ── */
+QToolButton#nav-btn {
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #444441;
+    padding: 0;
+}
+QToolButton#nav-btn:hover             { background: #1a1a18; color: #888780; }
+QToolButton#nav-btn[active="true"]    { background: #0A3828; color: #5DCAA5; }
+
+/* ── 输入框 ── */
+QLineEdit {
+    background: #111110;
+    border: 0.5px solid #1e1e1c;
+    border-radius: 4px;
+    color: #c8c7c0;
+    padding: 3px 8px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+    selection-background-color: #1D9E75;
+}
+QLineEdit:focus { border-color: #1D9E75; }
+
+/* ── 下拉框 ── */
+QComboBox {
+    background: #111110;
+    border: 0.5px solid #1e1e1c;
+    border-radius: 4px;
+    color: #c8c7c0;
+    padding: 3px 8px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+}
+QComboBox:focus              { border-color: #1D9E75; }
+QComboBox::drop-down         { border: none; width: 14px; }
+QComboBox QAbstractItemView  {
+    background: #1a1a18;
+    border: 0.5px solid #333331;
+    selection-background-color: #0A3828;
+    color: #c8c7c0;
+    font-size: 10px;
+}
+
+/* ── 表格 ── */
+QTableWidget {
+    background: #0e0e0c;
+    border: none;
+    gridline-color: #0e0e0c;
+    color: #c8c7c0;
+    font-size: 11px;
+    selection-background-color: #071f16;
+}
+QTableWidget::item                  { padding: 7px 10px; border-bottom: 1px solid #0e0e0c; }
+QTableWidget::item:hover            { background: #141412; }
+QTableWidget::item:selected         { background: #071f16; color: #c8c7c0; }
+
+QHeaderView::section {
+    background: #111110;
+    color: #444441;
+    font-size: 10px;
+    font-weight: 400;
+    padding: 6px 10px;
+    border: none;
+    border-bottom: 1px solid #1e1e1c;
+    border-right: none;
+}
+QHeaderView::section:hover { color: #888780; }
+
+/* ── 滚动条 ── */
+QScrollBar:vertical             { background: #0e0e0c; width: 6px; border: none; }
+QScrollBar::handle:vertical     { background: #2a2a28; border-radius: 3px; min-height: 20px; }
+QScrollBar::handle:vertical:hover { background: #444441; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal           { background: #0e0e0c; height: 6px; border: none; }
+QScrollBar::handle:horizontal   { background: #2a2a28; border-radius: 3px; min-width: 20px; }
+QScrollBar::handle:horizontal:hover { background: #444441; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+/* ── 复选框 ── */
+QCheckBox               { spacing: 0; }
+QCheckBox::indicator    {
+    width: 13px; height: 13px;
+    border: 1px solid #2a2a28; border-radius: 2px; background: transparent;
+}
+QCheckBox::indicator:checked { background: #1D9E75; border-color: #1D9E75; }
+
+/* ── 右键菜单 ── */
+QMenu {
+    background: #1a1a18;
+    border: 0.5px solid #333331;
+    border-radius: 7px;
+    padding: 4px 0;
+    font-size: 11px;
+    color: #c8c7c0;
+}
+QMenu::item           { padding: 7px 14px 7px 24px; }
+QMenu::item:selected  { background: #0A3828; color: #5DCAA5; }
+QMenu::separator      { height: 0.5px; background: #2a2a28; margin: 3px 0; }
+
+/* ── 弹窗 ── */
+QDialog {
+    background: #0e0e0c;
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    color: #c8c7c0;
+}
