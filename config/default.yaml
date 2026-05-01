@@ -2,28 +2,49 @@
 # 文件位置: config/default.yaml
 # 名称: 默认配置文件
 # 作者: 蜂巢·大圣 (Hive-GreatSage)
-# 时间: 2026-04-27
-# 版本: V1.0.0
+# 时间: 2026-05-01
+# 版本: V1.1.0
 # 功能及相关说明:
 #   PC 中控框架的默认配置。
 #   本地覆盖项写在 config/local.yaml，该文件已 .gitignore。
 #
 # 改进内容:
+#   V1.1.0 - 增加 network 配置段，支持 /api/client/network-config 与回退机制。
 #   V1.0.0 - 初始版本
-#
-# 调试信息:
-#   已知问题: 无
 # ============================================================
 
 server:
-  api_base_url: "https://api.example.com"   # local.yaml 中覆盖为实际地址（⚠️ 用 127.0.0.1，不要用 localhost）
-  port: 443                                  # local.yaml 开发时覆盖为 8000
-  project_uuid: ""                           # 必须在 local.yaml 中填写
+  api_base_url: "https://api.example.com"   # local.yaml 中覆盖为实际地址（开发用 127.0.0.1，不要用 localhost）
+  port: 443
+  project_uuid: ""                          # 必须在 local.yaml 中填写
   timeout: 15
   max_retries: 3
 
+# 远程网络配置。
+# 说明：
+#   - PC 中控启动时会先用 last_good_api_url / candidate_api_url / server.api_base_url / backup_api_urls 选择可用地址。
+#   - 然后尝试访问 /api/client/network-config 拉取服务端下发配置。
+#   - 如果远程推荐地址可用，会写入 config/local.yaml。
+#   - 如果远程推荐地址不可用，会保留旧地址，避免一次错误配置导致客户端断连。
+network:
+  enabled: true
+  refresh_on_startup: true
+  refresh_after_login: true
+  allow_failover: true
+
+  config_version: 0
+  deployment_mode: "relay_tunnel"
+
+  last_good_api_url: ""
+  candidate_api_url: ""
+  backup_api_urls: []
+
+  relay_enabled: true
+  relay_mode: "frp"
+  relay_url: ""
+
 sync:
-  interval: 10          # 设备状态拉取间隔（秒）
+  interval: 10
   max_interval: 60
 
 ui:

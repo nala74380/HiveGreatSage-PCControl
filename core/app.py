@@ -2,26 +2,28 @@ r"""
 文件位置: core/app.py
 名称: 应用生命周期管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.3
+时间: 2026-05-01
+版本: V1.1.0
 功能及相关说明:
   Application 类，管理 QApplication 创建、配置加载、模块初始化和主流程调度。
 
 改进内容:
-  V1.0.3 (2026-04-27) - SyncManager 构造传入 auth_manager；连接 token_expired Signal
-                        到 _on_token_expired（主线程重新登录流程）
+  V1.1.0 (2026-05-01)
+    - 接入 NetworkConfigManager。
+    - 启动时拉取 /api/client/network-config。
+    - 支持 last_good_api_url / backup_api_urls 回退。
+    - 登录成功后轻量刷新远程网络配置。
+    - 远程配置变更后重载 AuthManager / DeviceManager 网络配置。
+  V1.0.3 (2026-04-27)
+    - SyncManager 构造传入 auth_manager；连接 token_expired Signal。
   V1.0.2 - 注入 TeamManager + 热更新检查流程
   V1.0.1 - 注入 DeviceManager + SyncManager，登录后启动同步
   V1.0.0 - 初始版本
-
-调试信息:
-  已知问题: 无
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog
@@ -33,6 +35,7 @@ from core.auth.auth_manager import AuthManager
 from core.device.device_manager import DeviceManager
 from core.sync.sync_manager import SyncManager
 from core.team.team_manager import TeamManager
+from core.network.network_config_manager import NetworkConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,7 @@ class Application:
         self._qt_app = QApplication(argv)
 
         from game.game_config import WINDOW_TITLE, GAME_VERSION
+
         self._qt_app.setApplicationName(WINDOW_TITLE)
         self._qt_app.setApplicationVersion(GAME_VERSION)
 
@@ -62,6 +66,19 @@ class Application:
         logger.info("=" * 60)
         logger.info("%s 启动", WINDOW_TITLE)
         logger.info("=" * 60)
+
+        # ── 网络配置 ───────────────────────────────────────────
+        self.network = NetworkConfigManager(self.config)
+        network_result = self.network.bootstrap()
+
+        logger.info(
+            "网络配置启动检查完成: api=%s source=%s changed=%s msg=%s",
+            self.config.get("server.api_base_url"),
+            network_result.source,
+            network_result.changed,
+            network_result.message,
+        )
+
         logger.debug(
             "API: %s  uuid: %s",
             self.config.get("server.api_base_url"),
@@ -121,13 +138,45 @@ class Application:
     # ─────────────────────────────────────────────────────
     def _do_login(self) -> bool:
         from ui.login_window import LoginWindow
-        win    = LoginWindow(self.auth)
+
+        win = LoginWindow(self.auth)
         result = win.exec()
-        return result == QDialog.Accepted
+
+        if result != QDialog.Accepted:
+            return False
+
+        self._refresh_network_config_after_login()
+        return True
+
+    def _refresh_network_config_after_login(self) -> None:
+        """
+        登录成功后轻量刷新远程 network-config。
+
+        说明:
+          - 远程配置接口本身不需要 Token。
+          - 这里放在登录成功后再跑一次，是为了让管理员刚保存的网络配置能尽快落到 PC 中控。
+          - 如果推荐地址不可用，NetworkConfigManager 会保留旧地址。
+        """
+        if not bool(self.config.get("network.refresh_after_login", True)):
+            return
+
+        try:
+            result = self.network.refresh_remote_config()
+
+            if result.changed:
+                self.auth.reload_network_config()
+                self.device_manager.reload_network_config()
+                logger.info("登录后网络配置已刷新并应用: %s", result.base_url)
+            else:
+                logger.debug("登录后网络配置检查完成: %s", result.message)
+
+        except Exception as exc:
+            logger.warning("登录后刷新 network-config 失败，继续使用当前地址: %s", exc)
 
     def _start_update_check(self) -> None:
         """启动后台热更新检查，结果在主窗口显示后通过信号处理。"""
         from core.updater.update_checker import UpdateCheckWorker
+
         self._update_worker = UpdateCheckWorker(self)
         self._update_worker.update_available.connect(self._on_update_available)
         self._update_worker.start()
@@ -136,6 +185,7 @@ class Application:
         """热更新结果回调（在主线程执行）。"""
         if self._main_window is None:
             return
+
         from ui.widgets.update_dialog import UpdateDialog
         from core.updater.update_downloader import UpdateDownloadWorker
         from core.updater.update_installer import install_and_restart
@@ -152,7 +202,6 @@ class Application:
         if dlg.exec() != QDialog.Accepted:
             return
 
-        # 显示下载进度
         progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self._main_window)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.show()
@@ -162,10 +211,11 @@ class Application:
         downloader.finished.connect(lambda path: (progress.close(), install_and_restart(path)))
         downloader.failed.connect(lambda msg: (progress.close(), logger.error("下载失败: %s", msg)))
         downloader.start()
-        self._download_worker = downloader   # 防 GC
+        self._download_worker = downloader
 
     def _show_main_window(self) -> None:
         from ui.main_window import MainWindow
+
         self._main_window = MainWindow(self)
         self._main_window.show()
         logger.info("主窗口已显示")
@@ -175,20 +225,17 @@ class Application:
         Token 过期且刷新失败的回调（在主线程执行）。
 
         处理逻辑：
-          1. 停止同步，避免持续频繁的 401
-          2. 弹出提示对话框，告知用户 Token 已过期
-          3. 用户确认后重新执行登录流程
-          4. 登录成功则重启同步，登录失败或取消则退出应用
-
-        注意：此方法通过 Qt queued connection 在主线程执行，安全。
+          1. 停止同步，避免持续频繁的 401。
+          2. 弹出提示对话框。
+          3. 用户确认后重新执行登录流程。
+          4. 登录成功则重启同步，登录失败或取消则退出应用。
         """
         logger.warning("收到 token_expired 信号，停止同步并弹出重新登录")
 
-        # 1. 停止同步
         self.sync_manager.stop()
 
-        # 2. 提示用户
         from PySide6.QtWidgets import QMessageBox
+
         parent = self._main_window
         msg = QMessageBox(parent)
         msg.setWindowTitle("登录状态已失效")
@@ -196,13 +243,11 @@ class Application:
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.exec()
 
-        # 3. 重新登录
         logged_in = self._do_login()
         if not logged_in:
             logger.info("用户取消重新登录，退出应用")
             self._qt_app.quit()
             return
 
-        # 4. 重启同步
         self.sync_manager.start()
         logger.info("重新登录成功，同步已重启")
