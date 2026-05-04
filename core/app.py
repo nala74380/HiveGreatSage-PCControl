@@ -126,8 +126,13 @@ class Application:
         # 4. 启动 WS 服务端（Phase 3）
         self.team_manager.start()
 
-        # 5. 显示主窗口
+        # 5. 显示主窗口（立即显示，不等待网络请求）
         self._show_main_window()
+
+        # 6. 后台拉取完整授权信息（/api/auth/me）— 更新顶部统计
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._fetch_user_info_async)
+
         result = self._qt_app.exec()
 
         # 退出时停止后台服务
@@ -212,6 +217,17 @@ class Application:
         downloader.failed.connect(lambda msg: (progress.close(), logger.error("下载失败: %s", msg)))
         downloader.start()
         self._download_worker = downloader
+
+    def _fetch_user_info_async(self) -> None:
+        """后台拉取 /api/auth/me，更新主窗口顶部授权统计。"""
+        if not self._main_window:
+            return
+        try:
+            self.auth.fetch_user_info()
+            if hasattr(self._main_window, 'update_auth_stats'):
+                self._main_window.update_auth_stats()
+        except Exception as e:
+            logger.warning("后台拉取用户信息失败: %s", e)
 
     def _show_main_window(self) -> None:
         from ui.main_window import MainWindow

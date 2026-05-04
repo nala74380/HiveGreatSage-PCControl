@@ -31,7 +31,7 @@ GAME_VERSION  = "1.0.0"
 # ── 项目 UUID（与 config/local.yaml → server.project_uuid 保持一致）──
 # 运行时实际从 Config.get("server.project_uuid") 读取，此处作为代码可读性声明。
 # ⚠️ 必须与 Verify 管理后台创建游戏项目时返回的 project_uuid 完全一致。
-PROJECT_UUID  = "07238db5-129a-4408-b82a-e025be4652a1"   # ← fork 后填入真实 UUID
+PROJECT_UUID  = "00000000-0000-0000-0000-000000000001"   # ← fork 后填入真实 UUID
 
 # ── 游戏数据库（仅供参考，PCControl 不直连 DB）──────────────
 # 规则：hive_{code_name}，在 Verify 后台创建时由 setup_game_db.py 生成

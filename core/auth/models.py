@@ -21,13 +21,15 @@ from dataclasses import dataclass, field
 @dataclass
 class UserInfo:
     """登录成功后服务端返回的用户信息。"""
-    username:     str = ""
-    user_level:   str = ""    # trial / normal / vip / svip / tester
-    display_name: str = ""
-    expired_at:   str = ""    # ISO 日期字符串，如 "2026-12-31"
-    device_quota: int = 0     # 该级别允许绑定的设备上限
-    project_uuid: str = ""
-    game_name:    str = ""
+    username:           str = ""
+    user_level:         str = ""    # trial / normal / vip / svip / tester
+    display_name:       str = ""
+    expired_at:         str = ""    # ISO 日期字符串，如 "2026-12-31"
+    device_quota:       int = 0     # 授权设备总数
+    activated_devices:  int = 0     # 已激活设备数
+    inactive_devices:   int | None = None  # 未激活设备数（无限制时 None）
+    project_uuid:       str = ""
+    game_name:          str = ""
 
 
 @dataclass

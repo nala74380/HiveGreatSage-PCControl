@@ -313,12 +313,12 @@ class TopBar(QWidget):
         sl = QHBoxLayout(stat)
         sl.setContentsMargins(14, 0, 14, 0)
         sl.setSpacing(5)
-        self._lbl_avail  = _label("—", C_GREEN,    14)
-        self._lbl_active = _label("—", C_TEAL,     14)
-        self._lbl_inact  = _label("—", C_TEXT_MID, 14)
-        for txt, val_lbl in [("可激活", self._lbl_avail),
-                              ("已激活", self._lbl_active),
-                              ("未激活", self._lbl_inact)]:
+        self._lbl_ava_auth  = _label(str(user.device_quota) if user.device_quota > 0 else "无限", C_GREEN,    14)
+        self._lbl_act_auth  = _label(str(user.activated_devices), C_TEAL,     14)
+        self._lbl_inact_auth = _label(str(user.inactive_devices) if user.inactive_devices is not None else "—", C_TEXT_MID, 14)
+        for txt, val_lbl in [("可激活", self._lbl_ava_auth),
+                              ("已激活", self._lbl_act_auth),
+                              ("未激活", self._lbl_inact_auth)]:
             sl.addWidget(_label(txt, C_TEXT_MUTE, 10))
             sl.addWidget(_label("/", C_BORDER2, 11))
             sl.addWidget(val_lbl)
@@ -333,7 +333,8 @@ class TopBar(QWidget):
         el.setContentsMargins(14, 0, 14, 0)
         el.setSpacing(5)
         el.addWidget(_label("到期：", C_TEXT_DIM, 11))
-        el.addWidget(_label(user.expired_at or "—", C_AMBER, 12))
+        expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
+        el.addWidget(_label(expiry, C_AMBER, 12))
         lay.addWidget(exp)
         lay.addWidget(_sep_v())
 
@@ -370,10 +371,19 @@ class TopBar(QWidget):
         lo_btn.clicked.connect(self._on_logout)
         lay.addWidget(lo_btn)
 
+    def update_auth_stats(self) -> None:
+        """更新顶部授权统计（/me 异步拉取完成后调用）。"""
+        user = self._app.auth.user_info
+        if hasattr(self, '_lbl_ava_auth'):
+            self._lbl_ava_auth.setText(str(user.device_quota) if user.device_quota > 0 else "无限")
+            self._lbl_act_auth.setText(str(user.activated_devices))
+            self._lbl_inact_auth.setText(str(user.inactive_devices) if user.inactive_devices is not None else "—")
+
     def update_stats(self, total: int, online: int) -> None:
-        self._lbl_avail.setText(str(total))
-        self._lbl_active.setText(str(online))
-        self._lbl_inact.setText(str(total - online))
+        if hasattr(self, '_lbl_dev_total'):
+            self._lbl_dev_total.setText(str(total))
+            self._lbl_dev_online.setText(str(online))
+            self._lbl_dev_offline.setText(str(total - online))
         self._sync_lbl.setText("已同步")
         self._sync_lbl.setStyleSheet(f"color:{C_TEAL}; font-size:11px;")
 
