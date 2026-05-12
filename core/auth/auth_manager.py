@@ -3,7 +3,7 @@
 名称: 认证管理器
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-03
-版本: V2.0.0
+版本: V2.1.0
 功能及相关说明:
     PC 中控认证管理器。
 
@@ -11,6 +11,7 @@
       1. 登录 / 登出 / Token 刷新。
       2. 管理 access_token、refresh_token。
       3. 提供同步接口（可在 QThread 中安全调用）。
+      4. 通过系统凭据管理器保存“记住密码”，禁止明文密码写入 local.yaml。
 
     与 Verify 交互:
       - POST /api/auth/login      — 用户登录
@@ -18,6 +19,7 @@
       - POST /api/auth/logout     — 登出
 
 改进历史:
+    V2.1.0 (2026-05-12): 使用 keyring 保存记住密码，并清理历史 saved_password 字段。
     V2.0.0 (2026-05-03): 重建被覆盖的文件。
 """
 
@@ -27,11 +29,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import keyring
+
 from core.api_client.auth_api import AuthApi
 from core.auth.models import LoginResult, UserInfo
 from core.utils.config import Config
 
 logger = logging.getLogger(__name__)
+
+_KEYRING_SERVICE = "HiveGreatSage-PCControl"
 
 
 class AuthManager:
@@ -46,6 +52,7 @@ class AuthManager:
         self._api: AuthApi | None = None
         self._saved_username: str = ""
         self._saved_password: str = ""
+        self._cleanup_legacy_saved_password()
 
     @property
     def is_logged_in(self) -> bool:
@@ -82,17 +89,46 @@ class AuthManager:
         return self._config.get("auth.saved_username", "") or ""
 
     def get_saved_password(self, username: str) -> str:
-        if username and username == self.get_saved_username():
-            return self._config.get("auth.saved_password", "") or ""
-        return ""
+        """从系统凭据管理器读取记住密码；不再读取 local.yaml 明文字段。"""
+        if not username or username != self.get_saved_username():
+            return ""
+        try:
+            return keyring.get_password(_KEYRING_SERVICE, username) or ""
+        except Exception as e:
+            logger.warning("读取系统凭据失败: %s", e)
+            return ""
 
     def _save_credentials(self, username: str, password: str) -> None:
+        """保存用户名到 local.yaml，保存密码到系统凭据管理器。"""
         self._config.set_local("auth.saved_username", username)
-        self._config.set_local("auth.saved_password", password)
+        self._cleanup_legacy_saved_password()
+        try:
+            keyring.set_password(_KEYRING_SERVICE, username, password)
+        except Exception as e:
+            logger.warning("保存系统凭据失败: %s", e)
 
     def _clear_saved_credentials(self) -> None:
+        """清理记住登录信息，包括系统凭据与历史明文字段。"""
+        username = self.get_saved_username()
         self._config.set_local("auth.saved_username", "")
-        self._config.set_local("auth.saved_password", "")
+        self._cleanup_legacy_saved_password()
+
+        if username:
+            try:
+                keyring.delete_password(_KEYRING_SERVICE, username)
+            except Exception as e:
+                logger.debug("删除系统凭据失败或凭据不存在: %s", e)
+
+    def _cleanup_legacy_saved_password(self) -> None:
+        """清理历史版本曾写入 local.yaml 的 auth.saved_password 明文字段。"""
+        if self._config.get("auth.saved_password", None) is None:
+            return
+
+        remove_local = getattr(self._config, "remove_local", None)
+        if callable(remove_local):
+            remove_local("auth.saved_password")
+        else:
+            logger.warning("当前 Config 不支持 remove_local，无法自动清理 auth.saved_password")
 
     # ── 登录 ───────────────────────────────────────────────
 
