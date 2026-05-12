@@ -2,12 +2,15 @@ r"""
 文件位置: core/app.py
 名称: 应用生命周期管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-01
-版本: V1.1.0
+时间: 2026-05-12
+版本: V1.2.0
 功能及相关说明:
   Application 类，管理 QApplication 创建、配置加载、模块初始化和主流程调度。
 
 改进内容:
+  V1.2.0 (2026-05-12)
+    - 连接 SyncWorker.mock_fallback_used 信号。
+    - 当设备列表来自模拟数据时，主线程明确弹窗提示，避免误判为真实 Verify 数据。
   V1.1.0 (2026-05-01)
     - 接入 NetworkConfigManager。
     - 启动时拉取 /api/client/network-config。
@@ -107,6 +110,7 @@ class Application:
 
         # ── 主窗口（延迟创建）────────────────────────────────
         self._main_window = None
+        self._pending_mock_fallback_message: str | None = None
 
     # ─────────────────────────────────────────────────────
     def run(self) -> int:
@@ -119,8 +123,9 @@ class Application:
         if self.config.get("update.check_on_startup", True):
             self._start_update_check()
 
-        # 3. 启动设备同步（连接 token_expired 信号）
+        # 3. 启动设备同步（连接 token_expired / mock_fallback_used 信号）
         self.sync_manager.worker.token_expired.connect(self._on_token_expired)
+        self.sync_manager.worker.mock_fallback_used.connect(self._on_mock_fallback_used)
         self.sync_manager.start()
 
         # 4. 启动 WS 服务端（Phase 3）
@@ -132,6 +137,7 @@ class Application:
         # 6. 后台拉取完整授权信息（/api/auth/me）— 更新顶部统计
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, self._fetch_user_info_async)
+        QTimer.singleShot(200, self._show_pending_mock_fallback_notice)
 
         result = self._qt_app.exec()
 
@@ -267,3 +273,29 @@ class Application:
 
         self.sync_manager.start()
         logger.info("重新登录成功，同步已重启")
+
+    def _on_mock_fallback_used(self, message: str) -> None:
+        """收到模拟数据降级信号，记录并在主窗口可用时提示。"""
+        logger.warning("Mock fallback 已启用: %s", message)
+        self._pending_mock_fallback_message = message
+        self._show_pending_mock_fallback_notice()
+
+    def _show_pending_mock_fallback_notice(self) -> None:
+        """显示待处理的 mock fallback 提示，避免主窗口创建前丢失提示。"""
+        if not self._pending_mock_fallback_message or self._main_window is None:
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+
+        message = self._pending_mock_fallback_message
+        self._pending_mock_fallback_message = None
+
+        msg = QMessageBox(self._main_window)
+        msg.setWindowTitle("开发模式模拟数据提示")
+        msg.setText(message)
+        msg.setInformativeText(
+            "若要进行真实联调，请关闭 config/local.yaml 中的 "
+            "debug.allow_mock_fallback，并确认 Verify API 可访问。"
+        )
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.exec()
