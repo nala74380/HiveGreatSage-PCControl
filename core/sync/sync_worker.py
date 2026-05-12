@@ -2,8 +2,8 @@ r"""
 文件位置: core/sync/sync_worker.py
 名称: 数据同步工作线程
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.2
+时间: 2026-05-12
+版本: V1.1.0
 功能及相关说明:
   在独立 QThread 中每 10 秒向 Verify API 拉取设备列表，
   通过 Signal 将结果传回主线程（UI 层）更新设备表格。
@@ -14,18 +14,14 @@ r"""
     3. 刷新成功 → 立即用新 Token 重试一次 fetch
     4. 刷新失败 → emit token_expired Signal，主线程弹出重新登录
 
-  V1.0.2 关键修改：
-    _do_sync() 改用单一 except Exception 块 + getattr 属性检测。
-    不再依赖 except ApiError 的类型匹配。
-    原因：如果 Python sys.path 导致同一文件被以不同路径导入两次
-    （例如既作 core.api_client.base_client 又作 api_client.base_client），
-    Python 会产生两个不同的 ApiError 类对象，isinstance/except 检测失败。
-    getattr(e, 'status_code', None) 只检查属性，不依赖类身份，100% 可靠。
-
-  停止机制：
-    调用 requestInterruption() 后，工作线程在下一个 100ms 检查点退出循环。
+  Mock fallback 边界：
+    1. 生产默认禁止 mock fallback。
+    2. 只有 config/local.yaml 显式配置 debug.allow_mock_fallback=true 时才允许。
+    3. 默认还要求 server.api_base_url 指向 127.0.0.1 或 localhost。
+    4. 使用 mock fallback 时会 emit mock_fallback_used，UI/日志必须明确提示。
 
 改进内容:
+  V1.1.0 (2026-05-12) - mock fallback 改为显式配置开关，并增加 mock_fallback_used 信号。
   V1.0.2 (2026-04-28) - _do_sync 改为单一 except + getattr 属性检测，根本解决
                         类身份问题导致的 401 无法捕获；_handle_401 同样修改
   V1.0.1 (2026-04-27) - 注入 auth_manager，修复 Signal 未连接问题
@@ -57,11 +53,13 @@ class SyncWorker(QThread):
         devices_updated(list[DeviceInfo]): 成功拉取后触发，传递设备列表
         sync_error(str):                   拉取失败时触发，传递错误描述
         token_expired():                   AT 过期且刷新失败，通知主线程重新登录
+        mock_fallback_used(str):           开发模式启用模拟数据时触发，传递提示说明
     """
 
-    devices_updated = Signal(object)    # list[DeviceInfo]
-    sync_error      = Signal(str)
-    token_expired   = Signal()
+    devices_updated    = Signal(object)    # list[DeviceInfo]
+    sync_error         = Signal(str)
+    token_expired      = Signal()
+    mock_fallback_used = Signal(str)
 
     def __init__(
         self,
@@ -73,6 +71,7 @@ class SyncWorker(QThread):
         self._device_manager = device_manager
         self._auth           = auth_manager
         self._interval_sec   = interval_sec
+        self._mock_notice_emitted = False
 
     # ── 主循环 ──────────────────────────────────────────────────
 
@@ -117,11 +116,11 @@ class SyncWorker(QThread):
                 self.sync_error.emit(f"设备列表拉取失败 [{status_code}]: {detail}")
                 return
 
-            # ── 网络层错误或未知异常 → 开发模式降级模拟数据 ──────
-            if self._is_dev_mode():
-                self._try_mock_fallback()
+            # ── 网络层错误或未知异常 ─────────────────────────────
+            if self._is_mock_fallback_allowed():
+                self._try_mock_fallback(e)
             else:
-                logger.exception("SyncWorker 未知异常")
+                logger.exception("SyncWorker 同步异常，mock fallback 未启用")
                 self.sync_error.emit(f"同步异常: {e}")
 
     # ── 401 处理 ─────────────────────────────────────────────────
@@ -161,17 +160,46 @@ class SyncWorker(QThread):
 
     # ── 辅助 ─────────────────────────────────────────────────────
 
-    def _is_dev_mode(self) -> bool:
-        """判断是否为开发模式（API 地址为本机）。"""
-        base_url = self._device_manager._config.get("server.api_base_url", "")
+    def _is_local_api_url(self) -> bool:
+        """判断 API 地址是否为本机开发地址。"""
+        base_url = self._device_manager._config.get("server.api_base_url", "") or ""
+        base_url = base_url.lower()
         return "127.0.0.1" in base_url or "localhost" in base_url
 
-    def _try_mock_fallback(self) -> None:
-        """开发模式连接失败时降级为模拟数据。"""
+    def _is_mock_fallback_allowed(self) -> bool:
+        """
+        判断是否允许 mock fallback。
+
+        生产安全边界：
+          - 必须显式配置 debug.allow_mock_fallback=true。
+          - 默认要求 API 地址为本机开发地址。
+        """
+        cfg = self._device_manager._config
+        allow_mock = bool(cfg.get("debug.allow_mock_fallback", False))
+        require_local = bool(cfg.get("debug.require_local_api_for_mock", True))
+
+        if not allow_mock:
+            return False
+        if require_local and not self._is_local_api_url():
+            logger.warning(
+                "已配置 allow_mock_fallback=true，但 API 地址不是本机地址，拒绝启用 mock fallback"
+            )
+            return False
+        return True
+
+    def _try_mock_fallback(self, cause: Exception) -> None:
+        """开发模式连接失败时降级为模拟数据，并显式通知 UI/日志。"""
         try:
             from core.debug.mock_devices import generate_mock_devices
             devices = generate_mock_devices()
-            logger.debug("SyncWorker: 使用模拟数据（%d 台设备）", len(devices))
+            message = (
+                "开发模式：Verify API 不可用，当前设备列表来自模拟数据，"
+                "不得用于生产验收或真实联调。"
+            )
+            logger.warning("SyncWorker 启用 mock fallback: cause=%s devices=%d", cause, len(devices))
+            if not self._mock_notice_emitted:
+                self.mock_fallback_used.emit(message)
+                self._mock_notice_emitted = True
             self.devices_updated.emit(devices)
         except Exception as mock_err:
             logger.warning("SyncWorker: 模拟数据生成失败: %s", mock_err)
