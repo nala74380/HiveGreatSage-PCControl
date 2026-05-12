@@ -3,21 +3,23 @@ r"""
 文件位置: scripts/build.py
 名称: PyInstaller 打包脚本
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.0
+时间: 2026-05-12
+版本: V1.1.0
 功能及相关说明:
-  将 PC 中控框架打包为单个 .exe 文件。
+  将 PC 中控框架打包为 onedir 形式的 Windows 程序目录。
   打包策略：
     · --onedir 模式（比 --onefile 启动更快，且方便增量更新）
     · tools/adb/ 目录整体打包进 _internal/tools/adb/
     · config/default.yaml 打包进去
     · game/ 目录整体打包进去
+    · 打包完成后执行发布包清单检查，阻断本机态/运行态/测试态文件进入交付包
+
   打包后目录结构：
-    dist/HiveGreatSage-PCControl/
-      ├── HiveGreatSage-PCControl.exe   ← 主程序
+    dist/HiveGreatSage-yeya/
+      ├── HiveGreatSage-yeya.exe        ← 主程序
       ├── _internal/                    ← PyInstaller 运行时
-      ├── tools/adb/platform-tools/     ← ADB 工具包
-      └── config/default.yaml           ← 默认配置
+      ├── config/default.yaml           ← 默认配置
+      └── config/local.yaml.example     ← 本地配置模板
 
   运行方式：
     conda activate TZYMIR
@@ -25,6 +27,7 @@ r"""
     python scripts/build.py [--game yeya]
 
 改进内容:
+  V1.1.0 - 接入 check_release_manifest.py，发布前自动阻断脏发布包。
   V1.0.0 - 初始版本
 
 调试信息:
@@ -32,6 +35,8 @@ r"""
     · 首次打包需要 pip install pyinstaller
     · tools/adb/platform-tools/ 必须有真实的 adb.exe 才能打包
 """
+
+from __future__ import annotations
 
 import argparse
 import shutil
@@ -41,6 +46,23 @@ from pathlib import Path
 
 # ── 项目根目录 ──────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _run_release_manifest_check(dist_dir: Path) -> None:
+    """执行发布包清单检查，失败则中止打包流程。"""
+    checker = ROOT / "scripts" / "check_release_manifest.py"
+    if not checker.exists():
+        print(f"\n❌ 发布清单检查脚本不存在: {checker}")
+        sys.exit(1)
+
+    result = subprocess.run(
+        [sys.executable, str(checker), str(dist_dir)],
+        cwd=ROOT,
+    )
+    if result.returncode != 0:
+        print("\n❌ 发布包清单检查失败，已中止。")
+        sys.exit(result.returncode)
+
 
 def build(game_code: str = "yeya") -> None:
     print(f"=" * 60)
@@ -85,14 +107,14 @@ def build(game_code: str = "yeya") -> None:
         str(ROOT / "main.py"),
     ]
 
-    print("\n[1/3] 运行 PyInstaller...")
+    print("\n[1/4] 运行 PyInstaller...")
     print("命令：" + " ".join(cmd[2:]))
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
         print("\n❌ 打包失败，请检查上方错误信息")
         sys.exit(1)
 
-    print("\n[2/3] 复制 config/local.yaml 模板...")
+    print("\n[2/4] 复制 config/local.yaml 模板...")
     dist_dir = ROOT / "dist" / app_name
     (dist_dir / "config").mkdir(exist_ok=True)
     local_example = dist_dir / "config" / "local.yaml.example"
@@ -105,7 +127,10 @@ def build(game_code: str = "yeya") -> None:
         encoding="utf-8",
     )
 
-    print("\n[3/3] 打包完成！")
+    print("\n[3/4] 检查发布包清单...")
+    _run_release_manifest_check(dist_dir)
+
+    print("\n[4/4] 打包完成！")
     print(f"\n输出目录：{dist_dir}")
     print(f"主程序：  {dist_dir / (app_name + '.exe')}")
     print("\n发布前请确认：")
