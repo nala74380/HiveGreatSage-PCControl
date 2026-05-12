@@ -2,13 +2,14 @@ r"""
 文件位置: tests/test_auth.py
 名称: 认证模块单元测试
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.0
+时间: 2026-05-12
+版本: V2.0.0
 功能及相关说明:
   测试 AuthManager 和相关数据模型。
   使用 unittest.mock 模拟 API 调用，不依赖真实服务器。
 
 改进内容:
+  V2.0.0 - 对齐 AuthManager V2.1.0；覆盖 keyring 凭据存储，不再测试旧私有方法。
   V1.0.0 - 初始版本
 
 调试信息:
@@ -31,135 +32,260 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture
 def mock_config():
-    cfg = MagicMock()
-    cfg.get = lambda key, default=None: {
+    data = {
         "server.api_base_url": "http://127.0.0.1:8000",
-        "server.timeout":      15,
+        "server.timeout": 15,
         "server.project_uuid": "07238db5-129a-4408-b82a-e025be4652a1",
-    }.get(key, default)
+        "auth.saved_username": "",
+        "auth.saved_password": None,
+    }
+
+    cfg = MagicMock()
+    cfg.get = lambda key, default=None: data.get(key, default)
+
+    def set_local(key, value):
+        data[key] = value
+
+    def remove_local(key):
+        data.pop(key, None)
+
+    cfg.set_local.side_effect = set_local
+    cfg.remove_local.side_effect = remove_local
+    cfg._test_data = data
     return cfg
 
 
 @pytest.fixture
-def auth_manager(mock_config, tmp_path, monkeypatch):
-    """创建 AuthManager，并将文件路径重定向到临时目录。"""
+def auth_manager(mock_config):
+    """创建 AuthManager，并避免真实访问系统凭据管理器。"""
     from core.auth.auth_manager import AuthManager
 
-    monkeypatch.setattr(
-        "core.auth.auth_manager._PROJ_ROOT", tmp_path
-    )
-    (tmp_path / "config").mkdir(exist_ok=True)
-
-    with patch("keyring.get_password", return_value=None), \
-         patch("keyring.set_password"):
+    with patch("core.auth.auth_manager.keyring.get_password", return_value=None), \
+         patch("core.auth.auth_manager.keyring.set_password"), \
+         patch("core.auth.auth_manager.keyring.delete_password"):
         mgr = AuthManager(mock_config)
-    return mgr, tmp_path
+    return mgr
 
 
 # ── 测试：LoginResult 数据模型 ───────────────────────────────
 
 def test_login_result_defaults():
-    from core.auth.models import LoginResult, UserInfo
+    from core.auth.models import LoginResult
+
     result = LoginResult()
     assert result.success is False
     assert result.access_token == ""
-    assert result.error_code   == ""
+    assert result.refresh_token == ""
+    assert result.error_code == ""
 
 
 def test_user_info_defaults():
     from core.auth.models import UserInfo
+
     u = UserInfo()
-    assert u.username    == ""
-    assert u.user_level  == ""
+    assert u.username == ""
+    assert u.user_level == ""
     assert u.device_quota == 0
+    assert u.activated_devices == 0
 
 
-# ── 测试：AuthManager 本地方法 ───────────────────────────────
+# ── 测试：凭据存储 ────────────────────────────────────────────
 
 def test_get_saved_username_empty(auth_manager):
-    mgr, tmp = auth_manager
-    assert mgr.get_saved_username() == ""
+    assert auth_manager.get_saved_username() == ""
 
 
-def test_save_and_get_username(auth_manager):
-    mgr, tmp = auth_manager
-    mgr._save_last_login("test_user")
-    assert mgr.get_saved_username() == "test_user"
+def test_get_saved_password_uses_keyring_when_username_matches(mock_config):
+    from core.auth.auth_manager import AuthManager
+
+    mock_config._test_data["auth.saved_username"] = "admin"
+    with patch("core.auth.auth_manager.keyring.get_password", return_value="secret") as get_password:
+        mgr = AuthManager(mock_config)
+        assert mgr.get_saved_password("admin") == "secret"
+
+    get_password.assert_called_once_with("HiveGreatSage-PCControl", "admin")
 
 
-def test_hardware_serial_created(auth_manager):
-    mgr, tmp = auth_manager
-    serial = mgr._get_or_create_hardware_serial()
-    assert len(serial) == 36                          # UUID4 格式
-    assert (tmp / "config" / "device_id.txt").exists()
+def test_get_saved_password_returns_empty_when_username_mismatch(mock_config):
+    from core.auth.auth_manager import AuthManager
+
+    mock_config._test_data["auth.saved_username"] = "admin"
+    with patch("core.auth.auth_manager.keyring.get_password") as get_password:
+        mgr = AuthManager(mock_config)
+        assert mgr.get_saved_password("other") == ""
+
+    get_password.assert_not_called()
 
 
-def test_hardware_serial_stable(auth_manager):
-    mgr, tmp = auth_manager
-    s1 = mgr._get_or_create_hardware_serial()
-    s2 = mgr._get_or_create_hardware_serial()
-    assert s1 == s2
+def test_save_credentials_writes_username_to_local_and_password_to_keyring(mock_config):
+    from core.auth.auth_manager import AuthManager
+
+    with patch("core.auth.auth_manager.keyring.set_password") as set_password:
+        mgr = AuthManager(mock_config)
+        mgr._save_credentials("admin", "secret")
+
+    assert mock_config._test_data["auth.saved_username"] == "admin"
+    assert "auth.saved_password" not in mock_config._test_data
+    set_password.assert_called_once_with("HiveGreatSage-PCControl", "admin", "secret")
 
 
-# ── 测试：登录 payload 构造 ──────────────────────────────────
+def test_clear_saved_credentials_removes_username_password_and_keyring(mock_config):
+    from core.auth.auth_manager import AuthManager
 
-def test_build_login_payload(auth_manager):
-    mgr, _ = auth_manager
-    payload = mgr._build_login_payload("admin", "pass")
-    assert payload["username"]           == "admin"
-    assert payload["password"]           == "pass"
-    assert payload["project_uuid"]       == "07238db5-129a-4408-b82a-e025be4652a1"
-    assert payload["client_type"]        == "pc"
-    assert "device_fingerprint" in payload
+    mock_config._test_data["auth.saved_username"] = "admin"
+    mock_config._test_data["auth.saved_password"] = "legacy-secret"
+
+    with patch("core.auth.auth_manager.keyring.delete_password") as delete_password:
+        mgr = AuthManager(mock_config)
+        mgr._clear_saved_credentials()
+
+    assert mock_config._test_data["auth.saved_username"] == ""
+    assert "auth.saved_password" not in mock_config._test_data
+    delete_password.assert_called_once_with("HiveGreatSage-PCControl", "admin")
 
 
-# ── 测试：API 错误映射 ───────────────────────────────────────
+def test_init_cleans_legacy_saved_password(mock_config):
+    from core.auth.auth_manager import AuthManager
 
-def test_map_api_error_401(auth_manager):
+    mock_config._test_data["auth.saved_password"] = "legacy-secret"
+    AuthManager(mock_config)
+
+    assert "auth.saved_password" not in mock_config._test_data
+    mock_config.remove_local.assert_called_with("auth.saved_password")
+
+
+# ── 测试：登录流程 ────────────────────────────────────────────
+
+def test_login_success_remember_false_clears_saved_credentials(auth_manager):
+    fake_api = MagicMock()
+    fake_api.login.return_value = {
+        "access_token": "fake_at_token",
+        "refresh_token": "fake_rt_token",
+        "username": "admin",
+    }
+    auth_manager._api = fake_api
+
+    with patch.object(auth_manager, "_read_device_id", return_value="device-001"), \
+         patch.object(auth_manager, "_clear_saved_credentials") as clear_credentials:
+        result = auth_manager.login("admin", "pass", remember=False)
+
+    assert result.success is True
+    assert result.access_token == "fake_at_token"
+    assert result.refresh_token == "fake_rt_token"
+    assert auth_manager.is_logged_in is True
+    assert auth_manager.user_info.username == "admin"
+    assert auth_manager.user_info.project_uuid == "07238db5-129a-4408-b82a-e025be4652a1"
+    fake_api.login.assert_called_once_with({
+        "username": "admin",
+        "password": "pass",
+        "project_uuid": "07238db5-129a-4408-b82a-e025be4652a1",
+        "device_fingerprint": "device-001",
+        "client_type": "pc",
+    })
+    fake_api.set_token.assert_called_once_with("fake_at_token")
+    clear_credentials.assert_called_once()
+
+
+def test_login_success_remember_true_saves_credentials(auth_manager):
+    fake_api = MagicMock()
+    fake_api.login.return_value = {
+        "access_token": "fake_at_token",
+        "refresh_token": "fake_rt_token",
+        "username": "admin",
+    }
+    auth_manager._api = fake_api
+
+    with patch.object(auth_manager, "_read_device_id", return_value="device-001"), \
+         patch.object(auth_manager, "_save_credentials") as save_credentials:
+        result = auth_manager.login("admin", "pass", remember=True)
+
+    assert result.success is True
+    save_credentials.assert_called_once_with("admin", "pass")
+
+
+def test_login_failure_returns_login_result(auth_manager):
     from core.api_client.base_client import ApiError
-    mgr, _ = auth_manager
-    e      = ApiError(401, "用户名或密码错误", "")
-    result = mgr._map_api_error(e)
+
+    fake_api = MagicMock()
+    fake_api.login.side_effect = ApiError(401, "用户名或密码错误", "INVALID_CREDENTIALS")
+    auth_manager._api = fake_api
+
+    result = auth_manager.login("admin", "bad-pass")
+
     assert result.success is False
     assert result.error_message == "用户名或密码错误"
-    assert result.error_code    == "INVALID_CREDENTIALS"
+    assert result.error_code == "401"
+    assert auth_manager.is_logged_in is False
 
 
-def test_map_api_error_403_with_detail(auth_manager):
-    from core.api_client.base_client import ApiError
-    mgr, _ = auth_manager
-    e      = ApiError(403, "游戏授权已过期", "")
-    result = mgr._map_api_error(e)
-    assert result.success is False
-    assert result.error_message == "游戏授权已过期"
+# ── 测试：用户信息 / Token / 登出 ─────────────────────────────
 
-
-def test_map_api_error_network(auth_manager):
-    import httpx
-    mgr, _ = auth_manager
-    with patch.object(mgr._api, "login", side_effect=httpx.RequestError("conn")):
-        result = mgr.login("u", "p")
-    assert result.success    is False
-    assert result.error_code == "NETWORK_ERROR"
-
-
-# ── 测试：登录成功流程 ───────────────────────────────────────
-
-def test_login_success(auth_manager):
-    mgr, _ = auth_manager
-    fake_response = {
-        "access_token":  "fake_at_token",
-        "refresh_token": "fake_rt_token",
-        "username":      "admin",
-        "user_level":    "tester",
-        "game_project_code": "game_002",
+def test_fetch_user_info_updates_auth_info(auth_manager):
+    fake_api = MagicMock()
+    fake_api.me.return_value = {
+        "authorization_level": "tester",
+        "authorized_devices": 10,
+        "valid_until": "2027-01-01",
+        "activated_devices": 3,
+        "inactive_devices": 7,
     }
-    with patch.object(mgr._api, "login", return_value=fake_response), \
-         patch("keyring.set_password"):
-        result = mgr.login("admin", "pass")
+    auth_manager._api = fake_api
+    auth_manager._user_info.username = "admin"
+    auth_manager._user_info.display_name = "admin"
+    auth_manager._user_info.project_uuid = "project-001"
 
-    assert result.success        is True
-    assert result.access_token   == "fake_at_token"
-    assert mgr.is_logged_in      is True
-    assert mgr.user_info.username == "admin"
-    assert mgr.user_info.user_level == "tester"
+    auth_manager.fetch_user_info()
+
+    assert auth_manager.user_info.user_level == "tester"
+    assert auth_manager.user_info.device_quota == 10
+    assert auth_manager.user_info.activated_devices == 3
+    assert auth_manager.auth_info["authorization_level"] == "tester"
+
+
+def test_refresh_access_token_success(auth_manager):
+    fake_api = MagicMock()
+    fake_api.refresh_token.return_value = {
+        "access_token": "new_at",
+        "refresh_token": "new_rt",
+    }
+    auth_manager._api = fake_api
+    auth_manager._refresh_token = "old_rt"
+
+    assert auth_manager.refresh_access_token() is True
+    assert auth_manager.access_token == "new_at"
+    assert auth_manager._refresh_token == "new_rt"
+    fake_api.refresh_token.assert_called_once_with("old_rt")
+    fake_api.set_token.assert_called_once_with("new_at")
+
+
+def test_refresh_access_token_without_refresh_token_returns_false(auth_manager):
+    auth_manager._refresh_token = None
+    assert auth_manager.refresh_access_token() is False
+
+
+def test_logout_clears_local_state(auth_manager):
+    fake_api = MagicMock()
+    auth_manager._api = fake_api
+    auth_manager._access_token = "at"
+    auth_manager._refresh_token = "rt"
+
+    auth_manager.logout()
+
+    fake_api.logout.assert_called_once()
+    fake_api.set_token.assert_called_once_with(None)
+    assert auth_manager.access_token is None
+    assert auth_manager._refresh_token is None
+    assert auth_manager.is_logged_in is False
+
+
+def test_update_network_config_preserves_access_token(auth_manager):
+    auth_manager._access_token = "at"
+
+    with patch("core.auth.auth_manager.AuthApi") as auth_api_cls:
+        fake_api = MagicMock()
+        auth_api_cls.return_value = fake_api
+        auth_manager.update_network_config("http://new.example", 20)
+
+    auth_api_cls.assert_called_once_with(base_url="http://new.example", timeout=20)
+    fake_api.set_token.assert_called_once_with("at")
+    assert auth_manager._api is fake_api
