@@ -3,13 +3,14 @@ r"""
 名称: 配置管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-04-27
-版本: V1.0.0
+版本: V1.1.0
 功能及相关说明:
   加载 default.yaml 和 local.yaml，提供全局唯一的 Config 单例。
   local.yaml 的值覆盖 default.yaml。
   通过 dotted key（如 "server.api_base_url"）访问嵌套值。
 
 改进内容:
+  V1.1.0 - 增加 remove_local()，用于清理运行态本地配置键。
   V1.0.0 - 初始版本
 
 调试信息:
@@ -42,6 +43,17 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = copy.deepcopy(value)
     return result
+
+
+def _prune_empty_dicts(node: dict) -> bool:
+    """递归删除空字典。返回当前节点是否为空。"""
+    empty_keys = []
+    for key, value in node.items():
+        if isinstance(value, dict) and _prune_empty_dicts(value):
+            empty_keys.append(key)
+    for key in empty_keys:
+        node.pop(key, None)
+    return not node
 
 
 class Config:
@@ -132,3 +144,38 @@ class Config:
 
         self._data = _deep_merge(self._data, local_data)
         logger.debug("config/local.yaml 已更新: %s = %s", key, value)
+
+    def remove_local(self, key: str) -> None:
+        """
+        从 config/local.yaml 删除 dotted key，并重新加载配置。
+
+        用途：
+          - 清理历史版本误写入 local.yaml 的敏感字段。
+          - 删除不再需要的运行态配置。
+        """
+        local_path = _PROJ_ROOT / LOCAL_YAML
+        if not local_path.exists():
+            return
+
+        with open(local_path, encoding="utf-8") as f:
+            local_data = yaml.safe_load(f) or {}
+
+        parts = key.split(".")
+        node = local_data
+        parents: list[dict] = []
+        for part in parts[:-1]:
+            if not isinstance(node, dict) or part not in node:
+                return
+            parents.append(node)
+            node = node[part]
+
+        if isinstance(node, dict):
+            node.pop(parts[-1], None)
+
+        _prune_empty_dicts(local_data)
+
+        with open(local_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(local_data, f, allow_unicode=True, default_flow_style=False)
+
+        self._load()
+        logger.debug("config/local.yaml 已删除: %s", key)
