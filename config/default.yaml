@@ -2,13 +2,14 @@
 # 文件位置: config/default.yaml
 # 名称: 默认配置文件
 # 作者: 蜂巢·大圣 (Hive-GreatSage)
-# 时间: 2026-05-01
-# 版本: V1.1.0
+# 时间: 2026-05-12
+# 版本: V1.2.0
 # 功能及相关说明:
 #   PC 中控框架的默认配置。
 #   本地覆盖项写在 config/local.yaml，该文件已 .gitignore。
 #
 # 改进内容:
+#   V1.2.0 - 增加 debug.allow_mock_fallback，生产默认禁止模拟数据降级。
 #   V1.1.0 - 增加 network 配置段，支持 /api/client/network-config 与回退机制。
 #   V1.0.0 - 初始版本
 # ============================================================
@@ -19,6 +20,15 @@ server:
   project_uuid: ""                          # 必须在 local.yaml 中填写
   timeout: 15
   max_retries: 3
+
+# 调试配置。
+# 说明：
+#   - allow_mock_fallback 默认为 false，生产环境严禁自动显示模拟设备。
+#   - 仅在本地 UI 调试时，可在 config/local.yaml 中显式设置为 true。
+#   - 即使 allow_mock_fallback=true，也只有 server.api_base_url 指向 127.0.0.1 或 localhost 时才会启用模拟数据降级。
+debug:
+  allow_mock_fallback: false
+  require_local_api_for_mock: true
 
 # 远程网络配置。
 # 说明：
