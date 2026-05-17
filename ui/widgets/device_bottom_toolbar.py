@@ -3,7 +3,7 @@ r"""
 名称: 设备管理页底部主操作工具栏
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.0
+版本: V1.0.1
 状态: P1 UI 边界重构执行中
 功能及相关说明:
   设备管理页底部主操作工具栏。
@@ -25,7 +25,6 @@ from ui.styles.colors import (
     AMBER_BG,
     RED,
     RED_BG,
-    TEXT,
     TEXT_MID,
     TEXT_MUTE,
     MONO_FONT,
@@ -36,6 +35,7 @@ class DeviceBottomToolbar(QWidget):
     """设备页底部主操作工具栏。"""
 
     toggle_all_requested = Signal(bool)
+    invert_selection_requested = Signal()
     clear_selection_requested = Signal()
     select_online_requested = Signal()
     select_error_requested = Signal()
@@ -69,7 +69,7 @@ class DeviceBottomToolbar(QWidget):
         self._chk_all.stateChanged.connect(lambda state: self.toggle_all_requested.emit(bool(state)))
         lay.addWidget(self._chk_all)
 
-        lay.addWidget(self._button("反选", self.clear_selection_requested.emit, tooltip="当前阶段暂用作清空选择；后续补反选逻辑"))
+        lay.addWidget(self._button("反选", self.invert_selection_requested.emit))
         lay.addWidget(self._button("清空选择", self.clear_selection_requested.emit))
         lay.addWidget(self._button("仅选在线", self.select_online_requested.emit))
         lay.addWidget(self._button("仅选异常", self.select_error_requested.emit))
