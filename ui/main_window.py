@@ -3,15 +3,17 @@ r"""
 名称: 主窗口
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.3.0
-状态: P1 UI 边界重构执行中
+版本: V1.4.0
+状态: P2 UI 边界重构执行中
 功能及相关说明:
   登录成功后显示的主操作窗口。
   V1.3.0：主窗口收敛为装配层；设备管理页迁移到 ui/pages/device_page.py。
+  V1.4.0：全局设置入口切换到 ui/dialogs/global_settings_dialog.py。
 
 边界说明:
   - 本文件只负责 TopBar、TabBar、页面装配、同步信号连接。
   - 设备管理页布局由 ui/pages/device_page.py 承担。
+  - 全局设置由 ui/dialogs/global_settings_dialog.py 承担。
   - 本文件不实现远控、投屏、scrcpy、公网远控、Relay 远控。
 """
 
@@ -36,7 +38,6 @@ from ui.styles.colors import (
     TEAL_BG,
     TEAL_BG2,
     GREEN,
-    GREEN_BG,
     AMBER,
     AMBER_BG,
     TEXT,
@@ -370,8 +371,8 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentIndex(self._page_index.get(page_id, 0))
 
     def open_settings(self) -> None:
-        from ui.widgets.settings_dialog import SettingsDialog
-        SettingsDialog(self._app, self).exec()
+        from ui.dialogs.global_settings_dialog import GlobalSettingsDialog
+        GlobalSettingsDialog(self._app, self).exec()
 
     def open_log_viewer(self) -> None:
         from ui.widgets.log_viewer_widget import LogViewerDialog
