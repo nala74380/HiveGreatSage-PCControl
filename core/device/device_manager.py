@@ -85,7 +85,7 @@ class DeviceManager:
 
         devices: list[DeviceInfo] = []
         for raw in devices_raw:
-            fp = raw.get("device_id", "")
+            fp = raw.get("device_fingerprint", "")
             meta = self._meta.get(fp, {})
             dev = DeviceInfo.from_api(raw, meta)
             devices.append(dev)

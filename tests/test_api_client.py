@@ -120,7 +120,7 @@ def test_auth_api_refresh():
 
     fake_resp = {"access_token": "new_at", "expires_in": 900}
     with patch("httpx.request", return_value=_make_mock_response(200, fake_resp)):
-        result = api.refresh_token("old_rt")
+        result = api.refresh_token("old_rt", "device-001", "pc")
 
     assert result["access_token"] == "new_at"
 
@@ -134,8 +134,17 @@ def test_device_api_get_list():
 
     fake_resp = {
         "devices": [
-            {"device_id": "fp001", "user_id": 1, "status": "running",
-             "is_online": True, "last_seen": None, "game_data": {}}
+            {
+                "device_fingerprint": "fp001",
+                "device_id": "A-001",
+                "connection_type": "tcp",
+                "connection_label": "192.168.1.8:5555",
+                "user_id": 1,
+                "status": "running",
+                "is_online": True,
+                "last_seen": None,
+                "game_data": {},
+            }
         ],
         "total": 1, "online_count": 1,
     }
@@ -143,7 +152,8 @@ def test_device_api_get_list():
         result = api.get_device_list()
 
     assert result["total"] == 1
-    assert result["devices"][0]["device_id"] == "fp001"
+    assert result["devices"][0]["device_fingerprint"] == "fp001"
+    assert result["devices"][0]["device_id"] == "A-001"
 
 
 # ── DeviceInfo 模型 ───────────────────────────────────────────
@@ -151,15 +161,21 @@ def test_device_api_get_list():
 def test_device_info_from_api_basic():
     from core.device.models import DeviceInfo
     raw = {
-        "device_id": "fp_abc",
-        "user_id":   42,
-        "status":    "running",
+        "device_fingerprint": "fp_abc",
+        "device_id": "A-001",
+        "connection_type": "usb",
+        "connection_label": "SN:TEST1234",
+        "user_id": 42,
+        "status": "running",
         "is_online": True,
         "last_seen": None,
         "game_data": {"task": "日常任务", "level": 55, "combat_power": 300000, "server": "S2"},
     }
     dev = DeviceInfo.from_api(raw)
-    assert dev.fingerprint    == "fp_abc"
+    assert dev.device_fingerprint == "fp_abc"
+    assert dev.device_id == "A-001"
+    assert dev.connection_type == "usb"
+    assert dev.connection_label == "SN:TEST1234"
     assert dev.api_status     == "running"
     assert dev.task           == "日常任务"
     assert dev.level          == 55
@@ -169,18 +185,25 @@ def test_device_info_from_api_basic():
 
 def test_device_info_meta_merge():
     from core.device.models import DeviceInfo
-    raw = {"device_id": "fp_xyz", "user_id": 1, "status": "idle",
-           "is_online": False, "last_seen": None, "game_data": {}}
-    meta = {"alias": "A-007", "role": "captain", "note": "主力号"}
-    dev  = DeviceInfo.from_api(raw, meta)
-    assert dev.alias      == "A-007"
-    assert dev.role       == "captain"
+    raw = {
+        "device_fingerprint": "fp_xyz",
+        "device_id": "A-007",
+        "user_id": 1,
+        "status": "idle",
+        "is_online": False,
+        "last_seen": None,
+        "game_data": {},
+    }
+    meta = {"role": "captain", "note": "主力号"}
+    dev = DeviceInfo.from_api(raw, meta)
+    assert dev.device_id == "A-007"
+    assert dev.role == "captain"
     assert dev.display_id == "A-007"
 
 
 def test_device_info_heartbeat_str_none():
     from core.device.models import DeviceInfo
-    dev = DeviceInfo(fingerprint="fp")
+    dev = DeviceInfo(device_fingerprint="fp")
     assert dev.heartbeat_str == "—"
 
 
@@ -188,7 +211,7 @@ def test_device_info_heartbeat_str_recent():
     from core.device.models import DeviceInfo
     from datetime import datetime, timezone, timedelta
     dev = DeviceInfo(
-        fingerprint="fp",
+        device_fingerprint="fp",
         last_seen=datetime.now(timezone.utc) - timedelta(seconds=5),
     )
     assert "刚才" in dev.heartbeat_str or "s前" in dev.heartbeat_str

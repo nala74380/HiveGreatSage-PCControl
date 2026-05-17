@@ -1,9 +1,9 @@
-"""
+r"""
 文件位置: core/auth/auth_manager.py
 名称: 认证管理器
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-03
-版本: V2.1.0
+时间: 2026-05-17
+版本: V2.2.0
 功能及相关说明:
     PC 中控认证管理器。
 
@@ -18,7 +18,14 @@
       - POST /api/auth/refresh    — 刷新 Access Token
       - POST /api/auth/logout     — 登出
 
+    当前设备标识口径:
+      - device_fingerprint = PC 端内部稳定绑定键
+      - device_id = 对外暴露的设备编号（当前先沿用稳定绑定键）
+      - connection_type = tcp
+      - connection_label = Verify 地址
+
 改进历史:
+    V2.2.0 (2026-05-17) - 对齐 Verify 新设备标识契约与 refresh 请求体。
     V2.1.0 (2026-05-12): 使用 keyring 保存记住密码，并清理历史 saved_password 字段。
     V2.0.0 (2026-05-03): 重建被覆盖的文件。
 """
@@ -70,8 +77,6 @@ class AuthManager:
     def auth_info(self) -> dict[str, Any]:
         return self._auth_info
 
-    # ── API 客户端 ──────────────────────────────────────────
-
     def _get_api(self) -> AuthApi:
         if self._api is None:
             base_url = self._config.get("server.api_base_url", "")
@@ -83,13 +88,10 @@ class AuthManager:
         if self._api and self._access_token:
             self._api.set_token(self._access_token)
 
-    # ── 凭据存储 ───────────────────────────────────────────
-
     def get_saved_username(self) -> str:
         return self._config.get("auth.saved_username", "") or ""
 
     def get_saved_password(self, username: str) -> str:
-        """从系统凭据管理器读取记住密码；不再读取 local.yaml 明文字段。"""
         if not username or username != self.get_saved_username():
             return ""
         try:
@@ -99,7 +101,6 @@ class AuthManager:
             return ""
 
     def _save_credentials(self, username: str, password: str) -> None:
-        """保存用户名到 local.yaml，保存密码到系统凭据管理器。"""
         self._config.set_local("auth.saved_username", username)
         self._cleanup_legacy_saved_password()
         try:
@@ -108,7 +109,6 @@ class AuthManager:
             logger.warning("保存系统凭据失败: %s", e)
 
     def _clear_saved_credentials(self) -> None:
-        """清理记住登录信息，包括系统凭据与历史明文字段。"""
         username = self.get_saved_username()
         self._config.set_local("auth.saved_username", "")
         self._cleanup_legacy_saved_password()
@@ -120,7 +120,6 @@ class AuthManager:
                 logger.debug("删除系统凭据失败或凭据不存在: %s", e)
 
     def _cleanup_legacy_saved_password(self) -> None:
-        """清理历史版本曾写入 local.yaml 的 auth.saved_password 明文字段。"""
         if self._config.get("auth.saved_password", None) is None:
             return
 
@@ -130,26 +129,21 @@ class AuthManager:
         else:
             logger.warning("当前 Config 不支持 remove_local，无法自动清理 auth.saved_password")
 
-    # ── 登录 ───────────────────────────────────────────────
-
-    def login(self, username: str, password: str,
-              remember: bool = False) -> LoginResult:
-        """
-        同步登录。project_uuid 和 device_fingerprint 从 Config 读取。
-
-        Returns:
-            LoginResult with success=True + tokens, or error_message.
-        """
+    def login(self, username: str, password: str, remember: bool = False) -> LoginResult:
         api = self._get_api()
 
         project_uuid = self._config.get("server.project_uuid", "")
         device_fingerprint = self._read_device_id()
+        connection_label = self._config.get("server.api_base_url", "") or "pc"
 
         payload = {
             "username": username,
             "password": password,
             "project_uuid": project_uuid,
             "device_fingerprint": device_fingerprint,
+            "device_id": device_fingerprint,
+            "connection_type": "tcp",
+            "connection_label": connection_label,
             "client_type": "pc",
         }
 
@@ -186,13 +180,7 @@ class AuthManager:
             user_info=self._user_info,
         )
 
-    # ── 用户信息 ──────────────────────────────────────────
-
     def fetch_user_info(self) -> None:
-        """
-        从 /api/auth/me 拉取完整授权信息（异步友好，可在 QThread 调用）。
-        填充 _user_info 和 _auth_info。
-        """
         api = self._get_api()
         try:
             me_data = api.me()
@@ -210,18 +198,16 @@ class AuthManager:
         except Exception as e:
             logger.warning("获取 /me 失败: %s", e)
 
-    # ── Token 刷新 ──────────────────────────────────────────
-
     def refresh_access_token(self) -> bool:
-        """刷新 Access Token。成功返回 True，失败返回 False。"""
         if not self._refresh_token:
             logger.warning("refresh_token 为空")
             return False
 
         api = self._get_api()
+        device_fingerprint = self._read_device_id()
 
         try:
-            data = api.refresh_token(self._refresh_token)
+            data = api.refresh_token(self._refresh_token, device_fingerprint, "pc")
         except Exception as e:
             logger.warning("Token 刷新失败: %s", e)
             return False
@@ -239,10 +225,7 @@ class AuthManager:
         logger.info("Token 刷新成功")
         return True
 
-    # ── 登出 ───────────────────────────────────────────────
-
     def logout(self) -> None:
-        """登出：调用服务端 + 清空本地。"""
         if self._api and self._refresh_token:
             try:
                 self._api.logout()
@@ -256,26 +239,20 @@ class AuthManager:
         if self._api:
             self._api.set_token(None)
 
-    # ── 配置更新 ───────────────────────────────────────────
-
     def reload_network_config(self) -> None:
-        """重载 API 客户端（app.py 在网络配置变更后调用）。"""
         base_url = self._config.get("server.api_base_url", "")
         timeout = float(self._config.get("server.timeout", 15))
         self.update_network_config(base_url, timeout)
 
     def update_network_config(self, base_url: str, timeout: float) -> None:
-        """运行时更新 API 客户端配置。"""
         new_api = AuthApi(base_url=base_url, timeout=timeout)
         if self._access_token:
             new_api.set_token(self._access_token)
         self._api = new_api
 
-    # ── 内部 ───────────────────────────────────────────────
-
     @staticmethod
     def _read_device_id() -> str:
-        """从 config/device_id.txt 读取设备指纹。"""
+        """从 config/device_id.txt 读取设备内部稳定绑定键。"""
         from core.utils.constants import DEVICE_ID_FILE
         path = Path(__file__).resolve().parents[2] / DEVICE_ID_FILE
         if path.exists():

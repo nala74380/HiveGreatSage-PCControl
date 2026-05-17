@@ -125,7 +125,7 @@ def test_save_credentials_writes_username_to_local_and_password_to_keyring(mock_
         mgr._save_credentials("admin", "secret")
 
     assert mock_config._test_data["auth.saved_username"] == "admin"
-    assert "auth.saved_password" not in mock_config._test_data
+    assert mock_config._test_data.get("auth.saved_password") is None
     set_password.assert_called_once_with("HiveGreatSage-PCControl", "admin", "secret")
 
 
@@ -140,7 +140,7 @@ def test_clear_saved_credentials_removes_username_password_and_keyring(mock_conf
         mgr._clear_saved_credentials()
 
     assert mock_config._test_data["auth.saved_username"] == ""
-    assert "auth.saved_password" not in mock_config._test_data
+    assert mock_config._test_data.get("auth.saved_password") is None
     delete_password.assert_called_once_with("HiveGreatSage-PCControl", "admin")
 
 
@@ -150,7 +150,7 @@ def test_init_cleans_legacy_saved_password(mock_config):
     mock_config._test_data["auth.saved_password"] = "legacy-secret"
     AuthManager(mock_config)
 
-    assert "auth.saved_password" not in mock_config._test_data
+    assert mock_config._test_data.get("auth.saved_password") is None
     mock_config.remove_local.assert_called_with("auth.saved_password")
 
 
@@ -180,6 +180,9 @@ def test_login_success_remember_false_clears_saved_credentials(auth_manager):
         "password": "pass",
         "project_uuid": "07238db5-129a-4408-b82a-e025be4652a1",
         "device_fingerprint": "device-001",
+        "device_id": "device-001",
+        "connection_type": "tcp",
+        "connection_label": "http://127.0.0.1:8000",
         "client_type": "pc",
     })
     fake_api.set_token.assert_called_once_with("fake_at_token")
@@ -251,10 +254,11 @@ def test_refresh_access_token_success(auth_manager):
     auth_manager._api = fake_api
     auth_manager._refresh_token = "old_rt"
 
-    assert auth_manager.refresh_access_token() is True
+    with patch.object(auth_manager, "_read_device_id", return_value="device-001"):
+        assert auth_manager.refresh_access_token() is True
     assert auth_manager.access_token == "new_at"
     assert auth_manager._refresh_token == "new_rt"
-    fake_api.refresh_token.assert_called_once_with("old_rt")
+    fake_api.refresh_token.assert_called_once_with("old_rt", "device-001", "pc")
     fake_api.set_token.assert_called_once_with("new_at")
 
 

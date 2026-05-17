@@ -44,7 +44,7 @@ class DeviceApi(BaseClient):
 
         Returns:
             DeviceDataResponse dict:
-                device_id, user_id, status, last_seen, game_data,
-                is_online, source(redis/database/not_found)
+                device_fingerprint, device_id, connection_type, connection_label,
+                user_id, status, last_seen, game_data, is_online, source
         """
         return self.get("/api/device/data", params={"device_fingerprint": device_fingerprint})
