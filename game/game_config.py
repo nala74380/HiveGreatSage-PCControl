@@ -24,7 +24,7 @@ r"""
 
 # ── 游戏元信息（fork 后修改） ──────────────────────────────────
 
-GAME_NAME     = "椰芽"
+GAME_NAME     = "夜鸦"
 GAME_CODE     = "yeya"          # Verify 系统中的 code_name，需与 Verify 后台一致
 GAME_VERSION  = "1.0.0"
 
