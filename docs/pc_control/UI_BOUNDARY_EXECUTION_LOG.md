@@ -170,12 +170,76 @@ P1 当前代码可通过现有 pytest 测试集。
 
 ---
 
-## 4. 下一阶段
+## 4. P2：全局设置拆分
+
+### 4.1 已执行
+
+已新增：
+
+```text
+ui/dialogs/__init__.py
+ui/dialogs/global_settings_dialog.py
+```
+
+已修改：
+
+```text
+ui/main_window.py
+```
+
+### 4.2 已完成内容
+
+```text
+新增真正的 GlobalSettingsDialog。
+主窗口“全局设置”入口已切换到 ui/dialogs/global_settings_dialog.py。
+旧 ui/widgets/settings_dialog.py 继续保留，但不再作为主入口。
+GlobalSettingsDialog 只包含平台附加能力、客户环境、本地运行环境、日志、更新等配置。
+未把游戏账号表放入全局设置。
+未把游戏任务参数放入全局设置。
+未把物品、交易、制造、铸币放入全局设置。
+未引入无证据账号来源。
+```
+
+### 4.3 当前 GlobalSettingsDialog 页面
+
+```text
+服务器连接
+网络配置
+客户外部账号数据库
+接码平台
+邮箱服务
+ADB 设置
+日志与诊断
+更新设置
+本地缓存
+```
+
+### 4.4 相关提交
+
+```text
+e0d8f45ae9119965146388e44609cf528b27ea02  refactor(ui): add dialogs package
+0dcd21894cbfca8fa2c120a04932f754bcfb3709  feat(ui): add global settings dialog skeleton
+d64f881115eadacb0cbcb47b198b35bfa2602513  refactor(ui): route global settings to new dialog
+```
+
+### 4.5 待确认
+
+```text
+P2 尚未执行 compileall / pytest。
+P2 尚未执行手工点击验证。
+客户外部账号数据库连接测试仍为待实现提示，不代表连接能力已完成。
+本地缓存清理仍为待实现提示，不代表删除能力已完成。
+旧 settings_dialog.py 尚未删除，仅冻结保留。
+```
+
+---
+
+## 5. 下一阶段
 
 推荐先执行：
 
 ```text
-P1.2：全选文字按钮修正验证
+P2.1：全局设置拆分验证
 ```
 
 验证内容：
@@ -184,16 +248,18 @@ P1.2：全选文字按钮修正验证
 python -m compileall -q .
 pytest -q
 启动 PCControl。
-进入设备管理页。
-确认左侧入口显示为“全选”文字按钮。
-点击“全选”，当前列表设备全部勾选。
-按钮文案切换为“取消全选”。
-点击“取消全选”，当前列表设备全部取消勾选。
-反选、清空选择、仅选在线、仅选异常仍可用。
+点击顶部“全局设置”。
+确认打开的是新的 GlobalSettingsDialog。
+确认全局设置中没有游戏账号表。
+确认全局设置中没有游戏任务参数。
+确认全局设置中没有物品 / 交易 / 制造 / 铸币页面。
+确认存在服务器连接、网络配置、客户外部账号数据库、接码平台、邮箱服务、ADB、日志、更新、本地缓存页面。
+确认客户外部账号数据库页只配置连接和字段映射。
+确认保存后写入 config/local.yaml。
 ```
 
-通过 P1.2 后再进入：
+通过 P2.1 后再进入：
 
 ```text
-P2：全局设置拆分
+P3：设备设置对话框
 ```
