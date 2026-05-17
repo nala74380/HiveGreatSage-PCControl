@@ -3,7 +3,7 @@ r"""
 名称: 设备管理页底部主操作工具栏
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.2
+版本: V1.0.3
 状态: P1 UI 边界重构执行中
 功能及相关说明:
   设备管理页底部主操作工具栏。
@@ -12,8 +12,7 @@ r"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ui.styles.colors import (
     BORDER,
@@ -34,6 +33,8 @@ from ui.styles.colors import (
 class DeviceBottomToolbar(QWidget):
     """设备页底部主操作工具栏。"""
 
+    from PySide6.QtCore import Signal
+
     toggle_all_requested = Signal(bool)
     invert_selection_requested = Signal()
     clear_selection_requested = Signal()
@@ -52,6 +53,7 @@ class DeviceBottomToolbar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._all_checked = False
         self.setObjectName("device-bottom-toolbar")
         self.setFixedHeight(48)
         self.setStyleSheet(
@@ -64,10 +66,9 @@ class DeviceBottomToolbar(QWidget):
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(8)
 
-        self._chk_all = QCheckBox()
-        self._chk_all.setToolTip("全选 / 取消全选")
-        self._chk_all.stateChanged.connect(self._on_toggle_all_state_changed)
-        lay.addWidget(self._chk_all)
+        self._select_all_btn = self._button("全选", self._on_select_all_clicked, style="prim")
+        self._select_all_btn.setToolTip("全选当前列表中的设备；再次点击取消全选")
+        lay.addWidget(self._select_all_btn)
 
         lay.addWidget(self._button("反选", self.invert_selection_requested.emit))
         lay.addWidget(self._button("清空选择", self.clear_selection_requested.emit))
@@ -93,21 +94,21 @@ class DeviceBottomToolbar(QWidget):
         self._selected_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:12px; font-family:'{MONO_FONT}',monospace;")
         lay.addWidget(self._selected_label)
 
-    def _on_toggle_all_state_changed(self, state) -> None:
-        """兼容 PySide6 不同版本传入 int 或 Qt.CheckState 的情况。"""
-        if isinstance(state, Qt.CheckState):
-            checked = state == Qt.CheckState.Checked
-        else:
-            checked = int(state) == int(Qt.CheckState.Checked.value)
-        self.toggle_all_requested.emit(checked)
+    def _on_select_all_clicked(self) -> None:
+        next_checked = not self._all_checked
+        self.toggle_all_requested.emit(next_checked)
 
     def set_selected_count(self, count: int) -> None:
         self._selected_label.setText(f"已选 {count} 台")
 
     def set_all_checked(self, checked: bool) -> None:
-        self._chk_all.blockSignals(True)
-        self._chk_all.setChecked(checked)
-        self._chk_all.blockSignals(False)
+        self._all_checked = bool(checked)
+        if self._all_checked:
+            self._select_all_btn.setText("取消全选")
+            self._select_all_btn.setToolTip("取消选择当前列表中的全部设备")
+        else:
+            self._select_all_btn.setText("全选")
+            self._select_all_btn.setToolTip("全选当前列表中的设备")
 
     @staticmethod
     def _sep() -> QFrame:
