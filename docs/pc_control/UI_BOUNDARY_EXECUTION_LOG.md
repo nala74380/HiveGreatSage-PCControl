@@ -106,6 +106,7 @@ ec422092638c13b8a3e74e1473a116f89374075b  fix(ui): wire invert selection toolbar
 06c84612a9ee34b4d0e76fbbd1f00f32bf71c085  refactor(ui): extract device page with bottom toolbar
 3579a095565de0683afa78582550d50427772b54  refactor(ui): use extracted device page in main window
 0cdfba26301deb1f0821d8dadca79c2667341fa0  fix(ui): normalize toolbar checkbox state
+8af0c81590ce895d2d6d0bfdfc1f245a34f19f67  fix(ui): make select all action explicit
 ```
 
 ### 3.4 本地验证记录
@@ -139,38 +140,59 @@ P1 当前代码可通过现有 pytest 测试集。
 现有测试结果为 32 passed。
 ```
 
-### 3.6 待确认
+### 3.6 P1.1 手工交互验收记录
+
+用户反馈：
 
 ```text
-UI 手工点击验证尚未记录。
-设备页底部工具栏交互是否完全符合预期，仍需手工验证。
-右侧侧栏统计在真实设备数据下的显示效果，仍需手工验证。
+除“全选按钮仅显示为一个勾选框、不够清晰”外，其他手工验证都没有问题。
+```
+
+已修正：
+
+```text
+全选入口已从裸露勾选框改为明确文字按钮“全选”。
+当当前列表已全选时，按钮文案切换为“取消全选”。
+```
+
+修正提交：
+
+```text
+8af0c81590ce895d2d6d0bfdfc1f245a34f19f67  fix(ui): make select all action explicit
+```
+
+### 3.7 当前待确认
+
+```text
+全选文字按钮修正后尚需重新执行 compileall / pytest。
+全选文字按钮修正后尚需重新手工点击确认。
 ```
 
 ---
 
 ## 4. 下一阶段
 
-推荐进入：
+推荐先执行：
 
 ```text
-P1.1：设备页手工交互验收
+P1.2：全选文字按钮修正验证
 ```
 
-验收内容：
+验证内容：
 
 ```text
+python -m compileall -q .
+pytest -q
 启动 PCControl。
 进入设备管理页。
-确认工具栏位于底部。
-确认右侧侧栏存在。
-确认全选、反选、清空选择、仅选在线、仅选异常可用。
-确认批量设置入口仍可打开旧批量弹窗。
-确认右键菜单没有远控 / 投屏 / scrcpy。
-确认刷新按钮不会伪装成立即云端刷新。
+确认左侧入口显示为“全选”文字按钮。
+点击“全选”，当前列表设备全部勾选。
+按钮文案切换为“取消全选”。
+点击“取消全选”，当前列表设备全部取消勾选。
+反选、清空选择、仅选在线、仅选异常仍可用。
 ```
 
-通过 P1.1 后再进入：
+通过 P1.2 后再进入：
 
 ```text
 P2：全局设置拆分
