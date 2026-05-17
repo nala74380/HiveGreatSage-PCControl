@@ -3,7 +3,7 @@ r"""
 名称: 设备管理页底部主操作工具栏
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.1
+版本: V1.0.2
 状态: P1 UI 边界重构执行中
 功能及相关说明:
   设备管理页底部主操作工具栏。
@@ -12,7 +12,7 @@ r"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ui.styles.colors import (
@@ -66,7 +66,7 @@ class DeviceBottomToolbar(QWidget):
 
         self._chk_all = QCheckBox()
         self._chk_all.setToolTip("全选 / 取消全选")
-        self._chk_all.stateChanged.connect(lambda state: self.toggle_all_requested.emit(bool(state)))
+        self._chk_all.stateChanged.connect(self._on_toggle_all_state_changed)
         lay.addWidget(self._chk_all)
 
         lay.addWidget(self._button("反选", self.invert_selection_requested.emit))
@@ -92,6 +92,14 @@ class DeviceBottomToolbar(QWidget):
         self._selected_label = QLabel("已选 0 台")
         self._selected_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:12px; font-family:'{MONO_FONT}',monospace;")
         lay.addWidget(self._selected_label)
+
+    def _on_toggle_all_state_changed(self, state) -> None:
+        """兼容 PySide6 不同版本传入 int 或 Qt.CheckState 的情况。"""
+        if isinstance(state, Qt.CheckState):
+            checked = state == Qt.CheckState.Checked
+        else:
+            checked = int(state) == int(Qt.CheckState.Checked.value)
+        self.toggle_all_requested.emit(checked)
 
     def set_selected_count(self, count: int) -> None:
         self._selected_label.setText(f"已选 {count} 台")
