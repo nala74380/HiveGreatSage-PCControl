@@ -1,23 +1,43 @@
 r"""
 文件位置: ui/widgets/settings_dialog.py
-名称: 全局设置弹窗
+名称: 历史混合设置弹窗（已冻结）
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-04-27
-版本: V1.0.0
+版本: V1.0.1
+状态: 历史混合入口 / P0 已冻结 / 后续不再作为新增游戏配置入口
+
 功能及相关说明:
-  1200×900 全局设置弹窗，左侧标签导航，右侧内容区。
-  标签页：账号设置 / 脚本参数 / 仓库设置 / 物品设置 /
-          制造设置 / 活动设置 / 铸币设置 / 其他设置
-  - 账号设置：本地 config 字段（API地址/同步间隔等），可直接保存到 local.yaml
-  - 脚本参数：从 Verify API /api/params/get 动态加载，动态渲染表单，POST /api/params/set 保存
-  - 其他设置：日志级别/ADB 端口等
-  - 其余标签：占位提示（Phase 2 游戏层实现）
+  1200×900 设置弹窗，左侧标签导航，右侧内容区。
+  当前文件历史上同时承载了：账号设置 / 脚本参数 / 仓库设置 / 物品设置 /
+          制造设置 / 活动设置 / 铸币设置 / 其他设置。
+
+边界冻结说明:
+  1. 本文件属于历史混合入口，不代表新的 UI 边界设计。
+  2. 从 P0 起，不得继续向本文件新增游戏账号表、游戏任务参数、物品、交易、制造、铸币等游戏配置。
+  3. 新的全局设置应迁移到 ui/dialogs/global_settings_dialog.py。
+  4. 单设备游戏运行配置应迁移到 ui/dialogs/device_settings_dialog.py。
+  5. 多设备批量配置应迁移到 ui/dialogs/batch_settings_dialog.py。
+  6. 账号设置页里的账号是游戏账号，应属于设备设置 / 批量设置，不属于全局设置。
+  7. 当前已确认账号来源仅包括：手动录入游戏账号、客户外部账号数据库。
+  8. 禁止在当前 UI 中加入无证据账号来源。
+  9. 禁止加入远程控制、投屏、scrcpy、公网远控、Relay 远控等入口。
+
+迁移目标:
+  - 全局配置：server / network / sync / adb / update / log / 客户外部账号数据库 / 接码 / 邮箱 / 本地缓存
+  - 设备配置：主要设置 / 账号设置 / 任务设置 / 物品处理 / 购买 / 交易 / 制造 / 铸币 / 其他游戏参数
+  - 批量配置：目标设备摘要 / 批量账号 / 批量任务 / 批量参数 / 差异预览 / 应用结果
+
+关联文档:
+  - docs/pc_control/UI_BOUNDARY.md
+  - HiveGreatSage-Knowledge/02-PC中控框架/UI边界重构方案.md
+  - HiveGreatSage-Knowledge/02-PC中控框架/UI边界重构执行方案.md
 
 改进内容:
   V1.0.0 - 初始版本
+  V1.0.1 - P0 阶段冻结说明：不再作为新增游戏配置入口
 
 调试信息:
-  已知问题: 无
+  已知问题: 历史上混合了全局配置与游戏配置，后续需分阶段拆分。
 """
 
 from __future__ import annotations
@@ -199,7 +219,7 @@ class ParamsSaveWorker(QThread):
 # ─── 主弹窗 ──────────────────────────────────────────────────
 
 class SettingsDialog(QDialog):
-    """全局设置弹窗，1200×900。"""
+    """历史混合设置弹窗，P0 起冻结，不再作为新增游戏配置入口。"""
 
     def __init__(self, app: "Application", parent: QWidget | None = None) -> None:
         super().__init__(parent)
