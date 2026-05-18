@@ -3,13 +3,13 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.1.1
-状态: P3 UI 边界重构执行中
+版本: V1.2.0
+状态: P3.4-c LAN IP 自动匹配
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
-  V1.1.1 修复：对齐 DeviceInfo 真实字段 device_id。
+  P3.4-c：LAN 成员变化时刷新 AdbLinkManager 的 LAN IP 映射，并更新连接标识展示。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -23,7 +23,6 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -116,7 +115,7 @@ class ActivateWorker(QThread):
 
 
 class DevicePage(QWidget):
-    """设备管理页：筛选栏 + 表格/右侧栏 + 底部主操作工具栏。"""
+    """设备管理页：筛选栏 + Verify 设备主表 / LAN 摘要侧栏 + 底部主操作工具栏。"""
 
     def __init__(self, app: "Application") -> None:
         super().__init__()
@@ -126,6 +125,8 @@ class DevicePage(QWidget):
         self._row_devices: list[DeviceInfo] = []
         self._activate_workers: list[ActivateWorker] = []
         self._build()
+        self._connect_team_events()
+        self._refresh_lan_members(update_links=False)
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
@@ -226,11 +227,23 @@ class DevicePage(QWidget):
         tb.export_diagnostics_requested.connect(lambda: self._phase_hint("导出诊断"))
         tb.open_logs_requested.connect(self._open_log_viewer)
 
+    def _connect_team_events(self) -> None:
+        team_manager = getattr(self._app, "team_manager", None)
+        if team_manager is None:
+            return
+        ws_server = getattr(team_manager, "ws_server", None)
+        if ws_server is None:
+            return
+        ws_server.device_connected.connect(lambda *_: self._refresh_lan_members(update_links=True))
+        ws_server.device_disconnected.connect(lambda *_: self._refresh_lan_members(update_links=True))
+        ws_server.device_message.connect(lambda *_: self._refresh_lan_members(update_links=True))
+
     # ── 数据 ──────────────────────────────────────
 
     def refresh_devices(self, devices: list[DeviceInfo]) -> None:
         self._devices = devices
         self._apply_filters()
+        self._refresh_lan_members(update_links=False)
 
     def _apply_filters(self) -> None:
         search = self._f_search.text().strip().lower()
@@ -302,6 +315,39 @@ class DevicePage(QWidget):
         win = self.window()
         if hasattr(win, "update_stats"):
             win.update_stats(len(self._devices), online)
+
+    def _refresh_lan_members(self, update_links: bool = False) -> None:
+        team_manager = getattr(self._app, "team_manager", None)
+        members = team_manager.members if team_manager is not None else []
+        adb_links_manager = getattr(self._app, "adb_links", None)
+
+        if update_links and adb_links_manager is not None:
+            adb_links_manager.refresh_lan_ip_links(members)
+            self._refresh_device_adb_fields()
+            self._apply_filters()
+
+        adb_index = {}
+        if adb_links_manager is not None:
+            adb_index = adb_links_manager.build_connection_index([d.device_id for d in self._devices])
+        self._side_panel.update_lan_members(members, self._devices, adb_index)
+
+    def _refresh_device_adb_fields(self) -> None:
+        adb_links_manager = getattr(self._app, "adb_links", None)
+        if adb_links_manager is None or not self._devices:
+            return
+        adb_index = adb_links_manager.build_connection_index([d.device_id for d in self._devices])
+        for dev in self._devices:
+            link = adb_index.get(dev.device_id)
+            if link is None:
+                dev.connection_type = ""
+                dev.connection_label = ""
+                dev.adb_serial = ""
+                dev.adb_connected = False
+            else:
+                dev.connection_type = link.connection_type
+                dev.connection_label = link.connection_label
+                dev.adb_serial = link.adb_serial
+                dev.adb_connected = not link.conflict
 
     # ── 右键菜单 ──────────────────────────────────
 
@@ -388,9 +434,9 @@ class DevicePage(QWidget):
     def _on_activate_done(self, serial: str, ok: bool, msg: str) -> None:
         if ok:
             QMessageBox.information(self, "激活成功", f"{serial}\n{msg}")
-            fp = next((_device_key(d) for d in self._devices if d.adb_serial == serial), "")
-            if fp:
-                self._app.device_manager.update_meta(fp, activated=True)
+            device_id = next((_device_key(d) for d in self._devices if d.adb_serial == serial), "")
+            if device_id:
+                self._app.device_manager.update_meta(device_id, activated=True)
         else:
             QMessageBox.warning(self, "激活失败", f"{serial}\n{msg}")
         self._activate_workers = [w for w in self._activate_workers if w.isRunning()]
