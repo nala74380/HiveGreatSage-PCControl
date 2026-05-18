@@ -3,12 +3,13 @@ r"""
 名称: 设备设置弹窗
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.0
+版本: V1.0.1
 状态: P3 UI 边界重构执行中
 功能及相关说明:
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
   P3 第一轮仅建立骨架、页签结构、本地草稿提示和本地元数据兼容页。
+  V1.0.1 修复：对齐 DeviceInfo 真实字段 device_fingerprint，不再使用不存在的 fingerprint / alias 属性。
 
 边界说明:
   - 游戏账号设置属于本弹窗，当前只做页签骨架，不实现密码表格。
@@ -53,7 +54,6 @@ from ui.styles.colors import (
     AMBER_BG,
     TEXT,
     TEXT_MID,
-    TEXT_DIM,
     TEXT_MUTE,
     MONO_FONT,
 )
@@ -125,6 +125,10 @@ QLabel#hint {{ color: {TEXT_MUTE}; font-size: 10px; }}
 """
 
 
+def _device_key(device: "DeviceInfo") -> str:
+    return device.device_fingerprint
+
+
 class DeviceSettingsDialog(QDialog):
     """单设备游戏运行配置弹窗。"""
 
@@ -134,6 +138,7 @@ class DeviceSettingsDialog(QDialog):
         super().__init__(parent)
         self._app = app
         self._device = device
+        self._meta = self._app.device_manager.get_meta(_device_key(device))
         self.setStyleSheet(_QSS)
         self.setWindowTitle(f"设备设置 — {device.display_id}")
         self.setFixedSize(1400, 850)
@@ -154,7 +159,7 @@ class DeviceSettingsDialog(QDialog):
         title.setStyleSheet(f"color:{TEXT}; font-size:13px; font-weight:600;")
         header_lay.addWidget(title)
         header_lay.addSpacing(12)
-        fp = QLabel(self._device.fingerprint)
+        fp = QLabel(_device_key(self._device))
         fp.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
         header_lay.addWidget(fp)
         header_lay.addStretch()
@@ -275,7 +280,7 @@ class DeviceSettingsDialog(QDialog):
         page, lay = self._page()
         self._section(lay, "本地元数据兼容页")
         form = self._form()
-        self._alias_edit = QLineEdit(self._device.alias)
+        self._alias_edit = QLineEdit(self._meta.get("alias", self._device.device_id))
         form.addRow("显示编号", self._alias_edit)
         self._role_cb = QComboBox()
         for val, label in [
@@ -318,9 +323,10 @@ class DeviceSettingsDialog(QDialog):
         self._save_draft(scope="all")
 
     def _save_draft(self, scope: str) -> None:
+        device_key = _device_key(self._device)
         draft = {
-            "draft_id": f"device-{self._device.fingerprint[:12]}",
-            "device_fingerprint": self._device.fingerprint,
+            "draft_id": f"device-{device_key[:12]}",
+            "device_fingerprint": device_key,
             "device_display_id": self._device.display_id,
             "scope": scope,
             "synced": False,
@@ -353,18 +359,20 @@ class DeviceSettingsDialog(QDialog):
         self._status(f"本地草稿已保存：{path}", ok=True)
 
     def _save_local_meta(self) -> None:
+        device_key = _device_key(self._device)
         self._app.device_manager.update_meta(
-            fingerprint=self._device.fingerprint,
+            fingerprint=device_key,
             alias=self._alias_edit.text().strip(),
             role=self._role_cb.currentData() or "",
             note=self._note_edit.text().strip(),
         )
-        logger.info("设备本地元数据已保存: %s", self._device.fingerprint[:12])
-        self.meta_saved.emit(self._device.fingerprint)
+        logger.info("设备本地元数据已保存: %s", device_key[:12])
+        self.meta_saved.emit(device_key)
         self._status("本地元数据已保存到 device_meta.json。", ok=True)
 
     def _draft_path(self) -> Path:
-        safe_fp = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in self._device.fingerprint)
+        device_key = _device_key(self._device)
+        safe_fp = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in device_key)
         return Path.home() / ".hive_greatsage" / "pccontrol" / "profiles" / "device" / f"{safe_fp}.json"
 
     # ── Helpers ───────────────────────────────────
