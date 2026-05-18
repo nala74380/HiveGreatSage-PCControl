@@ -3,11 +3,14 @@ r"""
 名称: 应用生命周期管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.2.1
+版本: V1.3.0
 功能及相关说明:
   Application 类，管理 QApplication 创建、配置加载、模块初始化和主流程调度。
 
 改进内容:
+  V1.3.0 (2026-05-18)
+    - 初始化 AdbLinkManager。
+    - DeviceManager 改为注入 AdbLinkManager，不再直接接收 AdbManager。
   V1.2.1 (2026-05-18)
     - DeviceManager 构造时注入 AdbManager，用于设备页连接类型/连接标识本地展示。
   V1.2.0 (2026-05-12)
@@ -37,6 +40,7 @@ from core.utils.config import Config
 from core.utils.logger import setup_logger
 from core.utils.adb_manager import AdbManager
 from core.auth.auth_manager import AuthManager
+from core.device.adb_link_manager import AdbLinkManager
 from core.device.device_manager import DeviceManager
 from core.sync.sync_manager import SyncManager
 from core.team.team_manager import TeamManager
@@ -101,8 +105,11 @@ class Application:
         # ── 认证管理器 ────────────────────────────────────────
         self.auth = AuthManager(self.config)
 
+        # ── ADB 映射管理器 ───────────────────────────────────
+        self.adb_links = AdbLinkManager(self.adb)
+
         # ── 设备管理器 ─────────────────────────────────────────
-        self.device_manager = DeviceManager(self.config, self.auth, self.adb)
+        self.device_manager = DeviceManager(self.config, self.auth, self.adb_links)
 
         # ── 同步管理器 ─────────────────────────────────────────
         self.sync_manager = SyncManager(self.device_manager, self.auth, self.config)
