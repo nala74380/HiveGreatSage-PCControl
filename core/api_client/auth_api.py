@@ -39,7 +39,7 @@ class AuthApi(BaseClient):
         """
         return self.post("/api/auth/login", json=payload)
 
-    def refresh_token(self, refresh_token: str, device_fingerprint: str, client_type: str) -> dict:
+    def refresh_token(self, refresh_token: str, device_id: str, client_type: str) -> dict:
         """
         POST /api/auth/refresh
         无需 Authorization 头，用 refresh_token 换新 access_token。
@@ -48,7 +48,7 @@ class AuthApi(BaseClient):
             "/api/auth/refresh",
             json={
                 "refresh_token": refresh_token,
-                "device_fingerprint": device_fingerprint,
+                "device_id": device_id,
                 "client_type": client_type,
             },
         )

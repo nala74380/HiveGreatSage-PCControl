@@ -9,7 +9,7 @@ r"""
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
-  V1.1.1 修复：对齐 DeviceInfo 真实字段 device_fingerprint，不再使用不存在的 fingerprint 属性。
+  V1.1.1 修复：对齐 DeviceInfo 真实字段 device_id。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -92,12 +92,12 @@ def _label(text: str, color: str = C_TEXT_MUTE, size: int = 12) -> QLabel:
 
 
 def _device_key(dev: DeviceInfo) -> str:
-    """DeviceInfo 的真实稳定键。"""
-    return dev.device_fingerprint
+    """账号 + 项目下的设备编号。"""
+    return dev.device_id
 
 
 def _connection_text(dev: DeviceInfo) -> str:
-    return dev.connection_label or dev.device_fingerprint[:20]
+    return dev.connection_label or "—"
 
 
 class ActivateWorker(QThread):
@@ -244,7 +244,7 @@ class DevicePage(QWidget):
             if (not search
                 or search in d.display_id.lower()
                 or search in _connection_text(d).lower()
-                or search in d.device_fingerprint.lower()
+                or search in d.device_id.lower()
                 or search in d.server.lower())
             and (status_text == "全部状态" or d.api_status == status_map.get(status_text, ""))
             and (role_text == "全部角色" or d.role == role_map.get(role_text, ""))

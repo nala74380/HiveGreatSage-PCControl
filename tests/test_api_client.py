@@ -107,7 +107,7 @@ def test_auth_api_login():
     with patch("httpx.request", return_value=_make_mock_response(200, fake_resp)):
         result = api.login({
             "username": "u", "password": "p",
-            "project_uuid": "xxx", "device_fingerprint": "yyy", "client_type": "pc"
+            "project_uuid": "xxx", "device_id": "yyy", "client_type": "pc"
         })
 
     assert result["access_token"] == "at"
@@ -135,7 +135,6 @@ def test_device_api_get_list():
     fake_resp = {
         "devices": [
             {
-                "device_fingerprint": "fp001",
                 "device_id": "A-001",
                 "connection_type": "tcp",
                 "connection_label": "192.168.1.8:5555",
@@ -152,7 +151,6 @@ def test_device_api_get_list():
         result = api.get_device_list()
 
     assert result["total"] == 1
-    assert result["devices"][0]["device_fingerprint"] == "fp001"
     assert result["devices"][0]["device_id"] == "A-001"
 
 
@@ -161,7 +159,6 @@ def test_device_api_get_list():
 def test_device_info_from_api_basic():
     from core.device.models import DeviceInfo
     raw = {
-        "device_fingerprint": "fp_abc",
         "device_id": "A-001",
         "connection_type": "usb",
         "connection_label": "SN:TEST1234",
@@ -172,7 +169,6 @@ def test_device_info_from_api_basic():
         "game_data": {"task": "日常任务", "level": 55, "combat_power": 300000, "server": "S2"},
     }
     dev = DeviceInfo.from_api(raw)
-    assert dev.device_fingerprint == "fp_abc"
     assert dev.device_id == "A-001"
     assert dev.connection_type == "usb"
     assert dev.connection_label == "SN:TEST1234"
@@ -186,7 +182,6 @@ def test_device_info_from_api_basic():
 def test_device_info_meta_merge():
     from core.device.models import DeviceInfo
     raw = {
-        "device_fingerprint": "fp_xyz",
         "device_id": "A-007",
         "user_id": 1,
         "status": "idle",
@@ -203,7 +198,7 @@ def test_device_info_meta_merge():
 
 def test_device_info_heartbeat_str_none():
     from core.device.models import DeviceInfo
-    dev = DeviceInfo(device_fingerprint="fp")
+    dev = DeviceInfo(device_id="A-001")
     assert dev.heartbeat_str == "—"
 
 
@@ -211,7 +206,7 @@ def test_device_info_heartbeat_str_recent():
     from core.device.models import DeviceInfo
     from datetime import datetime, timezone, timedelta
     dev = DeviceInfo(
-        device_fingerprint="fp",
+        device_id="A-001",
         last_seen=datetime.now(timezone.utc) - timedelta(seconds=5),
     )
     assert "刚才" in dev.heartbeat_str or "s前" in dev.heartbeat_str

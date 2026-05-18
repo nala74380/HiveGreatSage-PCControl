@@ -7,12 +7,12 @@ r"""
 功能及相关说明:
   PC 中控本地的设备数据模型。
   数据来源三元合并：
-    1. Verify API 响应（device_fingerprint / device_id / connection_type / connection_label / status / last_seen / game_data / is_online）
+    1. Verify API 响应（device_id / connection_type / connection_label / status / last_seen / game_data / is_online）
     2. 本地元数据文件 config/device_meta.json（role / note，用户可编辑）
     3. ADB 本地扫描（adb_serial / adb_connected）
 
 改进内容:
-  V1.1.0 - 对齐 Verify 新设备标识口径：device_fingerprint 为内部绑定键，device_id 为用户自定义编号。
+  V1.1.0 - 对齐 Verify 设备编号绑定口径。
   V1.0.0 - 初始版本
 
 调试信息:
@@ -30,13 +30,11 @@ class DeviceInfo:
     """
     PC 中控本地设备信息，合并 API + 元数据 + ADB 三路来源。
 
-    · device_fingerprint : 内部稳定绑定键
-    · device_id         : 用户自定义设备编号
+    · device_id         : 用户填写的设备编号
     · connection_label  : USB 显示 SN；TCP 显示 IP:端口
     """
 
-    device_fingerprint: str
-    device_id: str = ""
+    device_id: str
     connection_type: str = ""
     connection_label: str = ""
     user_id: int = 0
@@ -59,7 +57,7 @@ class DeviceInfo:
 
     @property
     def display_id(self) -> str:
-        return self.device_id or self.connection_label or self.device_fingerprint[:12]
+        return self.device_id or self.connection_label or "—"
 
     @property
     def heartbeat_str(self) -> str:
@@ -95,7 +93,6 @@ class DeviceInfo:
                 last_seen = None
 
         return cls(
-            device_fingerprint=api_data.get("device_fingerprint", ""),
             device_id=api_data.get("device_id", "") or "",
             connection_type=api_data.get("connection_type", "") or "",
             connection_label=api_data.get("connection_label", "") or "",

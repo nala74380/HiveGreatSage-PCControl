@@ -179,7 +179,6 @@ def test_login_success_remember_false_clears_saved_credentials(auth_manager):
         "username": "admin",
         "password": "pass",
         "project_uuid": "07238db5-129a-4408-b82a-e025be4652a1",
-        "device_fingerprint": "device-001",
         "device_id": "device-001",
         "connection_type": "tcp",
         "connection_label": "http://127.0.0.1:8000",

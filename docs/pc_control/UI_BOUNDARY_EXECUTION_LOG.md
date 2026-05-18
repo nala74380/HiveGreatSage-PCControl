@@ -301,25 +301,25 @@ c8f89b8db8ac2d1a37234ba0adca8b60474f54f3  refactor(ui): route device edit action
 用户反馈运行异常：
 
 ```text
-AttributeError: 'DeviceInfo' object has no attribute 'fingerprint'
+AttributeError: 'DeviceInfo' object has no attribute legacy identifier
 ```
 
 已确认根因：
 
 ```text
-core/device/models.py 中 DeviceInfo 的真实稳定键为 device_fingerprint。
-P1/P3 重构代码错误使用了不存在的 fingerprint 属性。
+core/device/models.py 中 DeviceInfo 的真实设备键为 device_id。
+P1/P3 重构代码错误使用了不存在的旧属性。
 DeviceInfo 也没有 alias 直接属性，本地显示编号应来自 meta.alias 或 device_id。
 ```
 
 已修复：
 
 ```text
-ui/pages/device_page.py 改为使用 device.device_fingerprint。
+ui/pages/device_page.py 改为使用 device.device_id。
 ui/pages/device_page.py 增加 _row_devices 行号到 DeviceInfo 对象映射，不再用截断字符串反查设备。
-ui/dialogs/device_settings_dialog.py 改为使用 device.device_fingerprint。
-ui/dialogs/device_settings_dialog.py 本地元数据页使用 device_manager.get_meta(device_fingerprint) 获取 alias。
-本地草稿 draft_id、device_fingerprint、保存路径均改为基于 device_fingerprint。
+ui/dialogs/device_settings_dialog.py 改为使用 device.device_id。
+ui/dialogs/device_settings_dialog.py 本地元数据页使用 device_manager.get_meta(device_id) 获取 alias。
+本地草稿 draft_id、device_id、保存路径均改为基于 device_id。
 ```
 
 修复提交：
@@ -356,7 +356,7 @@ python -m compileall -q .
 pytest -q
 启动 PCControl。
 进入设备管理页。
-确认设备列表不再报 DeviceInfo.fingerprint 错误。
+确认设备列表不再报 DeviceInfo 旧属性错误。
 双击设备，确认打开 DeviceSettingsDialog。
 右键设备 -> 编辑 / 设置，确认打开 DeviceSettingsDialog。
 确认页签包含主要设置、账号设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、本地元数据、其他。

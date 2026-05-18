@@ -85,8 +85,8 @@ class DeviceManager:
 
         devices: list[DeviceInfo] = []
         for raw in devices_raw:
-            fp = raw.get("device_fingerprint", "")
-            meta = self._meta.get(fp, {})
+            device_key = raw.get("device_id", "")
+            meta = self._meta.get(device_key, {})
             dev = DeviceInfo.from_api(raw, meta)
             devices.append(dev)
 
@@ -99,7 +99,7 @@ class DeviceManager:
 
     def update_meta(
         self,
-        fingerprint: str,
+        device_key: str,
         alias: str = "",
         role: str = "",
         note: str = "",
@@ -108,7 +108,7 @@ class DeviceManager:
         """
         更新单台设备的本地元数据并持久化到 device_meta.json。
         """
-        entry = self._meta.setdefault(fingerprint, {})
+        entry = self._meta.setdefault(device_key, {})
         if alias:
             entry["alias"] = alias
         if role:
@@ -117,11 +117,11 @@ class DeviceManager:
         if activated is not None:
             entry["activated"] = activated
         self._save_meta()
-        logger.debug("设备元数据更新: %s → %s", fingerprint[:12], entry)
+        logger.debug("设备元数据更新: %s → %s", device_key, entry)
 
-    def get_meta(self, fingerprint: str) -> dict:
+    def get_meta(self, device_key: str) -> dict:
         """返回单台设备的本地元数据字典（不存在时返回空 dict）。"""
-        return dict(self._meta.get(fingerprint, {}))
+        return dict(self._meta.get(device_key, {}))
 
     # ── 内部方法 ─────────────────────────────────
 

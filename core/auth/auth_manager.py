@@ -18,9 +18,9 @@ r"""
       - POST /api/auth/refresh    — 刷新 Access Token
       - POST /api/auth/logout     — 登出
 
-    当前设备标识口径:
-      - device_fingerprint = PC 端内部稳定绑定键
-      - device_id = 对外暴露的设备编号（当前先沿用稳定绑定键）
+    当前设备绑定口径:
+      - 账号 + 项目 + 设备编号 是唯一绑定身份
+      - device_id = PC 端设备编号
       - connection_type = tcp
       - connection_label = Verify 地址
 
@@ -133,15 +133,20 @@ class AuthManager:
         api = self._get_api()
 
         project_uuid = self._config.get("server.project_uuid", "")
-        device_fingerprint = self._read_device_id()
+        device_id = self._read_device_id()
+        if not device_id:
+            return LoginResult(
+                success=False,
+                error_message="设备编号不能为空，请先配置 config/device_id.txt",
+                error_code="DEVICE_ID_REQUIRED",
+            )
         connection_label = self._config.get("server.api_base_url", "") or "pc"
 
         payload = {
             "username": username,
             "password": password,
             "project_uuid": project_uuid,
-            "device_fingerprint": device_fingerprint,
-            "device_id": device_fingerprint,
+            "device_id": device_id,
             "connection_type": "tcp",
             "connection_label": connection_label,
             "client_type": "pc",
@@ -204,10 +209,13 @@ class AuthManager:
             return False
 
         api = self._get_api()
-        device_fingerprint = self._read_device_id()
+        device_id = self._read_device_id()
+        if not device_id:
+            logger.warning("Token 刷新失败：设备编号为空")
+            return False
 
         try:
-            data = api.refresh_token(self._refresh_token, device_fingerprint, "pc")
+            data = api.refresh_token(self._refresh_token, device_id, "pc")
         except Exception as e:
             logger.warning("Token 刷新失败: %s", e)
             return False
@@ -252,7 +260,7 @@ class AuthManager:
 
     @staticmethod
     def _read_device_id() -> str:
-        """从 config/device_id.txt 读取设备内部稳定绑定键。"""
+        """从 config/device_id.txt 读取 PC 端设备编号。"""
         from core.utils.constants import DEVICE_ID_FILE
         path = Path(__file__).resolve().parents[2] / DEVICE_ID_FILE
         if path.exists():

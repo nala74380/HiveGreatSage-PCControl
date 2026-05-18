@@ -9,7 +9,7 @@ r"""
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
   P3 第一轮仅建立骨架、页签结构、本地草稿提示和本地元数据兼容页。
-  V1.0.1 修复：对齐 DeviceInfo 真实字段 device_fingerprint，不再使用不存在的 fingerprint / alias 属性。
+  V1.0.1 修复：对齐 DeviceInfo 真实字段 device_id。
 
 边界说明:
   - 游戏账号设置属于本弹窗，当前只做页签骨架，不实现密码表格。
@@ -126,7 +126,7 @@ QLabel#hint {{ color: {TEXT_MUTE}; font-size: 10px; }}
 
 
 def _device_key(device: "DeviceInfo") -> str:
-    return device.device_fingerprint
+    return device.device_id
 
 
 class DeviceSettingsDialog(QDialog):
@@ -326,7 +326,7 @@ class DeviceSettingsDialog(QDialog):
         device_key = _device_key(self._device)
         draft = {
             "draft_id": f"device-{device_key[:12]}",
-            "device_fingerprint": device_key,
+            "device_id": device_key,
             "device_display_id": self._device.display_id,
             "scope": scope,
             "synced": False,
@@ -361,7 +361,7 @@ class DeviceSettingsDialog(QDialog):
     def _save_local_meta(self) -> None:
         device_key = _device_key(self._device)
         self._app.device_manager.update_meta(
-            fingerprint=device_key,
+            device_key=device_key,
             alias=self._alias_edit.text().strip(),
             role=self._role_cb.currentData() or "",
             note=self._note_edit.text().strip(),
@@ -372,8 +372,8 @@ class DeviceSettingsDialog(QDialog):
 
     def _draft_path(self) -> Path:
         device_key = _device_key(self._device)
-        safe_fp = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in device_key)
-        return Path.home() / ".hive_greatsage" / "pccontrol" / "profiles" / "device" / f"{safe_fp}.json"
+        safe_device_id = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in device_key)
+        return Path.home() / ".hive_greatsage" / "pccontrol" / "profiles" / "device" / f"{safe_device_id}.json"
 
     # ── Helpers ───────────────────────────────────
 

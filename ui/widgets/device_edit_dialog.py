@@ -127,10 +127,10 @@ class DeviceEditDialog(QDialog):
     单设备编辑弹窗，500×420 固定大小。
 
     Signals:
-        meta_saved(str): 保存成功后触发，传递 fingerprint
+        meta_saved(str): 保存成功后触发，传递 device_id
     """
 
-    meta_saved = Signal(str)   # fingerprint
+    meta_saved = Signal(str)
 
     def __init__(
         self,
@@ -169,7 +169,7 @@ class DeviceEditDialog(QDialog):
         form.setContentsMargins(0, 0, 0, 0)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self._alias_edit = QLineEdit(self._device.alias)
+        self._alias_edit = QLineEdit(self._device.device_id)
         self._alias_edit.setPlaceholderText("如 A-001")
         form.addRow("显示编号", self._alias_edit)
 
@@ -208,7 +208,7 @@ class DeviceEditDialog(QDialog):
         root.addLayout(btn_row)
 
     def _build_info_card(self) -> QWidget:
-        """只读信息卡片（设备指纹/状态/最后心跳等）。"""
+        """只读信息卡片（设备编号/状态/最后心跳等）。"""
         card = QFrame()
         card.setObjectName("info-card")
         g = QGridLayout(card)
@@ -229,7 +229,7 @@ class DeviceEditDialog(QDialog):
             "error": "#F7C1C1", "offline": "#5F5E5A",
         }.get(dev.api_status, _C_TEXT_MID)
 
-        _kv(0, "设备指纹",  dev.fingerprint, _C_TEXT_MID)
+        _kv(0, "设备编号",  dev.device_id, _C_TEXT_MID)
         _kv(1, "状态",      dev.api_status or "offline", status_color)
         _kv(2, "在线",      "是" if dev.is_online else "否",
             _C_TEAL if dev.is_online else _C_TEXT_MUTE)
@@ -248,11 +248,11 @@ class DeviceEditDialog(QDialog):
         note  = self._note_edit.text().strip()
 
         self._manager.update_meta(
-            fingerprint=self._device.fingerprint,
+            device_key=self._device.device_id,
             alias=alias,
             role=role,
             note=note,
         )
-        logger.info("设备元数据已保存: %s alias=%s role=%s", self._device.fingerprint[:12], alias, role)
-        self.meta_saved.emit(self._device.fingerprint)
+        logger.info("设备元数据已保存: %s alias=%s role=%s", self._device.device_id, alias, role)
+        self.meta_saved.emit(self._device.device_id)
         self.accept()

@@ -287,7 +287,7 @@ class BatchDialog(QDialog):
             if "role" in settings:
                 meta_kwargs["role"] = settings["role"]
             if meta_kwargs:
-                self._manager.update_meta(dev.fingerprint, **meta_kwargs)
+                self._manager.update_meta(dev.device_id, **meta_kwargs)
 
         self.batch_apply.emit(settings)
         logger.info("批量设置已应用: %s 台设备 %s", len(self._devices), settings)

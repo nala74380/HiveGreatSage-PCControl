@@ -37,14 +37,14 @@ class DeviceApi(BaseClient):
         """
         return self.get("/api/device/list")
 
-    def get_device_data(self, device_fingerprint: str) -> dict:
+    def get_device_data(self, device_id: str) -> dict:
         """
-        GET /api/device/data?device_fingerprint=...
+        GET /api/device/data?device_id=...
         拉取单台设备运行数据详情。
 
         Returns:
             DeviceDataResponse dict:
-                device_fingerprint, device_id, connection_type, connection_label,
+                device_id, connection_type, connection_label,
                 user_id, status, last_seen, game_data, is_online, source
         """
-        return self.get("/api/device/data", params={"device_fingerprint": device_fingerprint})
+        return self.get("/api/device/data", params={"device_id": device_id})
