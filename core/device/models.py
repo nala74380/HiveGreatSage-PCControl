@@ -2,21 +2,23 @@ r"""
 文件位置: core/device/models.py
 名称: 设备数据模型
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-17
-版本: V1.1.0
+时间: 2026-05-18
+版本: V1.2.0
 功能及相关说明:
   PC 中控本地的设备数据模型。
-  数据来源三元合并：
-    1. Verify API 响应（device_id / connection_type / connection_label / status / last_seen / game_data / is_online）
-    2. 本地元数据文件 config/device_meta.json（role / note，用户可编辑）
-    3. ADB 本地扫描（adb_serial / adb_connected）
+  设备绑定主键统一为 device_id。
+  数据来源：
+    1. Verify API 响应：device_id / status / last_seen / game_data / is_online
+    2. 本地元数据文件 config/device_meta.json：role / note / activated，用户可编辑
+    3. PC 中控侧 ADB 查询：connection_type / connection_label / adb_serial / adb_connected
 
 改进内容:
+  V1.2.0 - 明确 connection_type / connection_label 为 PC 中控侧 ADB 本地展示信息，不从 Verify API 读取。
   V1.1.0 - 对齐 Verify 设备编号绑定口径。
   V1.0.0 - 初始版本
 
 调试信息:
-  已知问题: 无
+  已知问题: ADB 扫描结果注入 DeviceInfo 的链路尚待实现。
 """
 
 from __future__ import annotations
@@ -28,15 +30,18 @@ from datetime import datetime
 @dataclass
 class DeviceInfo:
     """
-    PC 中控本地设备信息，合并 API + 元数据 + ADB 三路来源。
+    PC 中控本地设备信息。
 
-    · device_id         : 用户填写的设备编号
-    · connection_label  : USB 显示 SN；TCP 显示 IP:端口
+    · device_id         : 用户填写的设备编号；账号 + 项目下的设备绑定主键
+    · connection_type   : PC 中控侧通过 ADB 查询得到的本地连接类型
+    · connection_label  : PC 中控侧通过 ADB 查询得到的本地连接展示标识
+
+    注意：
+      connection_type / connection_label 不参与 Verify 设备绑定唯一性。
+      安卓端登录 / 心跳不应把 connection_type / connection_label 作为绑定字段上报。
     """
 
     device_id: str
-    connection_type: str = ""
-    connection_label: str = ""
     user_id: int = 0
     api_status: str = "offline"
     last_seen: datetime | None = None
@@ -50,14 +55,16 @@ class DeviceInfo:
 
     role: str = ""
     note: str = ""
+    activated: bool = False
 
+    connection_type: str = ""
+    connection_label: str = ""
     adb_serial: str = ""
     adb_connected: bool = False
-    activated: bool = False
 
     @property
     def display_id(self) -> str:
-        return self.device_id or self.connection_label or "—"
+        return self.device_id or "—"
 
     @property
     def heartbeat_str(self) -> str:
@@ -94,8 +101,6 @@ class DeviceInfo:
 
         return cls(
             device_id=api_data.get("device_id", "") or "",
-            connection_type=api_data.get("connection_type", "") or "",
-            connection_label=api_data.get("connection_label", "") or "",
             user_id=api_data.get("user_id", 0),
             api_status=api_data.get("status") or "offline",
             last_seen=last_seen,
@@ -107,7 +112,9 @@ class DeviceInfo:
             server=str(game_data.get("server", "")),
             role=meta.get("role", ""),
             note=meta.get("note", ""),
+            activated=meta.get("activated", False),
+            connection_type="",
+            connection_label="",
             adb_serial="",
             adb_connected=False,
-            activated=meta.get("activated", False),
         )
