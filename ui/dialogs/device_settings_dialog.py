@@ -3,16 +3,18 @@ r"""
 名称: 设备设置弹窗
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-19
-版本: V1.3.0
-状态: P4 账号设置页 Ymir-CC 风格重整
+版本: V1.4.0
+状态: P4 设备设置页签整体补全
 功能及相关说明:
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
   P3.4-e 新增“本机 ADB 连接”页，用于人工绑定 device_id 与 PC 本机 adb_serial。
   P4 引入 AccountSettingsPage 与 PasswordEditor，账号设置页按 Ymir-CC 风格使用账号表格。
+  P4 继续补齐主要设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、其他参数页。
 
 边界说明:
   - 游戏账号设置属于本弹窗。
+  - 游戏运行配置属于设备设置 / 批量设备设置，不属于全局设置。
   - 本地 profile 只作为草稿/缓存，不是最终真相源。
   - 后端配置保存接口未联调前，不得声称云端配置闭环已完成。
   - ADB 绑定只写入 PC 中控本地 device_adb_links.json，不写 Verify 绑定主键。
@@ -39,28 +41,37 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.dialogs.device_settings.pages.account_settings_page import AccountSettingsPage
+from ui.dialogs.device_settings.pages.game_settings_pages import (
+    CraftSettingsPage,
+    ItemProcessingPage,
+    MainSettingsPage,
+    MintSettingsPage,
+    MiscSettingsPage,
+    PurchaseSettingsPage,
+    TaskSettingsPage,
+    TradeSettingsPage,
+)
 from ui.styles.colors import (
-    BG_MAIN,
-    BG_PANEL,
-    BG_DEEP,
-    BG_ITEM,
-    BORDER,
-    BORDER2,
-    TEAL,
-    TEAL_DK,
-    TEAL_BG,
     AMBER,
     AMBER_BG,
+    BG_DEEP,
+    BG_ITEM,
+    BG_MAIN,
+    BG_PANEL,
+    BORDER,
+    BORDER2,
+    MONO_FONT,
+    TEAL,
+    TEAL_BG,
+    TEAL_DK,
     TEXT,
     TEXT_MID,
     TEXT_MUTE,
-    MONO_FONT,
 )
 
 if TYPE_CHECKING:
@@ -92,7 +103,7 @@ QTabBar::tab:selected {{
     background: #0a1e17;
     border-top: 2px solid {TEAL_DK};
 }}
-QLineEdit, QComboBox, QTextEdit {{
+QLineEdit, QComboBox, QTextEdit, QSpinBox {{
     background: {BG_DEEP};
     border: 0.5px solid {BORDER};
     border-radius: 4px;
@@ -101,7 +112,8 @@ QLineEdit, QComboBox, QTextEdit {{
     font-family: '{MONO_FONT}', monospace;
     font-size: 11px;
 }}
-QLineEdit:focus, QComboBox:focus, QTextEdit:focus {{ border-color: {TEAL_DK}; }}
+QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QSpinBox:focus {{ border-color: {TEAL_DK}; }}
+QCheckBox {{ color: {TEXT_MID}; font-size: 11px; }}
 QPushButton {{
     background: transparent;
     border: 0.5px solid {BORDER2};
@@ -176,19 +188,28 @@ class DeviceSettingsDialog(QDialog):
         root.addWidget(header)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_main_page(), "主要设置")
+        self._main_page = MainSettingsPage()
         self._account_page = AccountSettingsPage()
+        self._task_page = TaskSettingsPage()
+        self._item_page = ItemProcessingPage()
+        self._purchase_page = PurchaseSettingsPage()
+        self._trade_page = TradeSettingsPage()
+        self._craft_page = CraftSettingsPage()
+        self._mint_page = MintSettingsPage()
+        self._misc_page = MiscSettingsPage()
         self._account_page.status_message.connect(self._status)
+
+        self._tabs.addTab(self._main_page, "主要设置")
         self._tabs.addTab(self._account_page, "账号设置")
-        self._tabs.addTab(self._build_task_page(), "任务设置")
-        self._tabs.addTab(self._placeholder_page("物品处理", "游戏物品处理策略页签骨架，P3 不实现具体字段。"), "物品处理")
-        self._tabs.addTab(self._placeholder_page("购买设置", "购买补给策略页签骨架，P3 不实现具体字段。"), "购买设置")
-        self._tabs.addTab(self._placeholder_page("交易设置", "交易策略页签骨架，P3 不实现具体字段。"), "交易设置")
-        self._tabs.addTab(self._placeholder_page("制造设置", "制造策略页签骨架，P3 不实现具体字段。"), "制造设置")
-        self._tabs.addTab(self._placeholder_page("铸币设置", "铸币策略页签骨架，P3 不实现具体字段。"), "铸币设置")
+        self._tabs.addTab(self._task_page, "任务设置")
+        self._tabs.addTab(self._item_page, "物品处理")
+        self._tabs.addTab(self._purchase_page, "购买设置")
+        self._tabs.addTab(self._trade_page, "交易设置")
+        self._tabs.addTab(self._craft_page, "制造设置")
+        self._tabs.addTab(self._mint_page, "铸币设置")
         self._tabs.addTab(self._build_adb_page(), "本机 ADB 连接")
         self._tabs.addTab(self._build_meta_page(), "本地元数据")
-        self._tabs.addTab(self._placeholder_page("其他游戏参数", "其他游戏参数页签骨架，P3 不实现具体字段。"), "其他")
+        self._tabs.addTab(self._misc_page, "其他")
         root.addWidget(self._tabs)
 
         footer = QWidget()
@@ -204,7 +225,7 @@ class DeviceSettingsDialog(QDialog):
         footer_lay.addWidget(reset_page_btn)
         footer_lay.addWidget(reset_all_btn)
         footer_lay.addSpacing(12)
-        self._status_label = QLabel("P4：账号设置页 Ymir-CC 风格重整；后端配置接口待联调。")
+        self._status_label = QLabel("P4：设备设置页签已补齐为本地草稿；后端配置接口待联调。")
         self._status_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
         footer_lay.addWidget(self._status_label)
         footer_lay.addStretch()
@@ -221,44 +242,7 @@ class DeviceSettingsDialog(QDialog):
         footer_lay.addWidget(close_footer_btn)
         root.addWidget(footer)
 
-    # ── Pages ─────────────────────────────────────
-
-    def _build_main_page(self) -> QWidget:
-        page, lay = self._page()
-        self._section(lay, "运行基础")
-        form = self._form()
-        self._run_mode = QComboBox()
-        for label, value in [("普通运行", "normal"), ("仅登录", "login_only"), ("仅维护", "maintenance")]:
-            self._run_mode.addItem(label, value)
-        form.addRow("运行模式", self._run_mode)
-        self._mainline_mode = QComboBox()
-        for label, value in [("保持当前", "keep"), ("启用主线", "enabled"), ("暂停主线", "paused")]:
-            self._mainline_mode.addItem(label, value)
-        form.addRow("主线任务", self._mainline_mode)
-        self._dungeon_mode = QComboBox()
-        for label, value in [("保持当前", "keep"), ("启用副本", "enabled"), ("暂停副本", "paused")]:
-            self._dungeon_mode.addItem(label, value)
-        form.addRow("副本设置", self._dungeon_mode)
-        lay.addLayout(form)
-        lay.addWidget(self._hint("P3 第一轮只建立字段骨架；具体游戏含义由游戏 fork 后续定义。"))
-        lay.addStretch()
-        return page
-
-    def _build_task_page(self) -> QWidget:
-        page, lay = self._page()
-        self._section(lay, "任务设置")
-        form = self._form()
-        self._task_profile = QLineEdit()
-        self._task_profile.setPlaceholderText("任务配置名 / 草稿名")
-        form.addRow("任务配置", self._task_profile)
-        self._task_note = QTextEdit()
-        self._task_note.setPlaceholderText("任务备注，仅作为本地草稿说明。")
-        self._task_note.setFixedHeight(120)
-        form.addRow("任务备注", self._task_note)
-        lay.addLayout(form)
-        lay.addWidget(self._hint("任务参数属于设备设置，不属于全局设置。后端保存接口待联调。"))
-        lay.addStretch()
-        return page
+    # ── ADB Link ──────────────────────────────────
 
     def _build_adb_page(self) -> QWidget:
         page, lay = self._page()
@@ -307,46 +291,6 @@ class DeviceSettingsDialog(QDialog):
         self._refresh_adb_binding_status()
         self._refresh_adb_devices()
         return page
-
-    def _build_meta_page(self) -> QWidget:
-        page, lay = self._page()
-        self._section(lay, "本地元数据")
-        form = self._form()
-        self._alias_edit = QLineEdit(self._meta.get("alias", self._device.device_id))
-        form.addRow("显示编号", self._alias_edit)
-        self._role_cb = QComboBox()
-        for val, label in [
-            ("", "— 未设置 —"),
-            ("captain", "队长 (Captain)"),
-            ("power", "战力号 (Power)"),
-            ("farmer", "打工号 (Farmer)"),
-            ("newbie", "新号 (Newbie)"),
-        ]:
-            self._role_cb.addItem(label, val)
-        idx = self._role_cb.findData(self._device.role)
-        if idx >= 0:
-            self._role_cb.setCurrentIndex(idx)
-        form.addRow("账号角色", self._role_cb)
-        self._note_edit = QLineEdit(self._device.note)
-        form.addRow("备注", self._note_edit)
-        lay.addLayout(form)
-        lay.addWidget(self._hint("本页保存到 device_meta.json，仅为 PC 本地元数据，不是游戏运行参数真相源。"))
-        save_meta_btn = QPushButton("保存本地元数据")
-        save_meta_btn.setObjectName("save-btn")
-        save_meta_btn.clicked.connect(self._save_local_meta)
-        lay.addWidget(save_meta_btn, alignment=Qt.AlignmentFlag.AlignLeft)
-        lay.addStretch()
-        return page
-
-    def _placeholder_page(self, title: str, hint: str) -> QWidget:
-        page, lay = self._page()
-        self._section(lay, title)
-        lay.addWidget(self._hint(hint))
-        lay.addWidget(self._hint("该页属于设备设置 / 游戏运行配置，不属于全局设置。"))
-        lay.addStretch()
-        return page
-
-    # ── ADB Link ──────────────────────────────────
 
     def _refresh_adb_devices(self) -> None:
         if not hasattr(self, "_adb_combo"):
@@ -431,44 +375,37 @@ class DeviceSettingsDialog(QDialog):
         else:
             self._status("未从已连接 ADB 设备读取到匹配 identity 文件。", ok=False)
 
-    # ── Save ──────────────────────────────────────
+    # ── 本地元数据 ────────────────────────────────
 
-    def _save_current_page_draft(self) -> None:
-        self._save_draft(scope="current_page")
-
-    def _save_all_draft(self) -> None:
-        self._save_draft(scope="all")
-
-    def _save_draft(self, scope: str) -> None:
-        device_key = _device_key(self._device)
-        account_draft = self._account_page.draft()
-        draft = {
-            "draft_id": f"device-{device_key[:12]}",
-            "device_id": device_key,
-            "device_display_id": self._device.display_id,
-            "scope": scope,
-            "synced": False,
-            "synced_at": None,
-            "remote_version": None,
-            "saved_at": datetime.now().isoformat(timespec="seconds"),
-            "note": "P4 本地草稿；不是最终真相源；后端配置接口待联调；真实密码不写入普通草稿。",
-            "main_settings": {
-                "run_mode": self._run_mode.currentData(),
-                "mainline_mode": self._mainline_mode.currentData(),
-                "dungeon_mode": self._dungeon_mode.currentData(),
-            },
-            "account_settings": account_draft.to_dict(),
-            "task_settings": {
-                "task_profile": self._task_profile.text().strip(),
-                "task_note": self._task_note.toPlainText().strip(),
-            },
-        }
-        path = self._draft_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(draft, f, ensure_ascii=False, indent=2)
-        logger.info("设备设置草稿已保存: %s", path)
-        self._status(f"本地草稿已保存：{path}", ok=True)
+    def _build_meta_page(self) -> QWidget:
+        page, lay = self._page()
+        self._section(lay, "本地元数据")
+        form = self._form()
+        self._alias_edit = QLineEdit(self._meta.get("alias", self._device.device_id))
+        form.addRow("显示编号", self._alias_edit)
+        self._role_cb = QComboBox()
+        for val, label in [
+            ("", "— 未设置 —"),
+            ("captain", "队长 (Captain)"),
+            ("power", "战力号 (Power)"),
+            ("farmer", "打工号 (Farmer)"),
+            ("newbie", "新号 (Newbie)"),
+        ]:
+            self._role_cb.addItem(label, val)
+        idx = self._role_cb.findData(self._device.role)
+        if idx >= 0:
+            self._role_cb.setCurrentIndex(idx)
+        form.addRow("账号角色", self._role_cb)
+        self._note_edit = QLineEdit(self._device.note)
+        form.addRow("备注", self._note_edit)
+        lay.addLayout(form)
+        lay.addWidget(self._hint("本页保存到 device_meta.json，仅为 PC 本地元数据，不是游戏运行参数真相源。"))
+        save_meta_btn = QPushButton("保存本地元数据")
+        save_meta_btn.setObjectName("save-btn")
+        save_meta_btn.clicked.connect(self._save_local_meta)
+        lay.addWidget(save_meta_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        lay.addStretch()
+        return page
 
     def _save_local_meta(self) -> None:
         device_key = _device_key(self._device)
@@ -481,6 +418,43 @@ class DeviceSettingsDialog(QDialog):
         logger.info("设备本地元数据已保存: %s", device_key[:12])
         self.meta_saved.emit(device_key)
         self._status("本地元数据已保存到 device_meta.json。", ok=True)
+
+    # ── Save ──────────────────────────────────────
+
+    def _save_current_page_draft(self) -> None:
+        self._save_draft(scope="current_page")
+
+    def _save_all_draft(self) -> None:
+        self._save_draft(scope="all")
+
+    def _save_draft(self, scope: str) -> None:
+        device_key = _device_key(self._device)
+        draft = {
+            "draft_id": f"device-{device_key[:12]}",
+            "device_id": device_key,
+            "device_display_id": self._device.display_id,
+            "scope": scope,
+            "synced": False,
+            "synced_at": None,
+            "remote_version": None,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "note": "P4 本地草稿；不是最终真相源；后端配置接口待联调；真实密码不写入普通草稿。",
+            "main_settings": self._main_page.draft(),
+            "account_settings": self._account_page.draft().to_dict(),
+            "task_settings": self._task_page.draft(),
+            "item_processing": self._item_page.draft(),
+            "purchase_settings": self._purchase_page.draft(),
+            "trade_settings": self._trade_page.draft(),
+            "craft_settings": self._craft_page.draft(),
+            "mint_settings": self._mint_page.draft(),
+            "misc_settings": self._misc_page.draft(),
+        }
+        path = self._draft_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(draft, f, ensure_ascii=False, indent=2)
+        logger.info("设备设置草稿已保存: %s", path)
+        self._status(f"本地草稿已保存：{path}", ok=True)
 
     def _draft_path(self) -> Path:
         device_key = _device_key(self._device)
