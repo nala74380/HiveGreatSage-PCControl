@@ -2,20 +2,26 @@ r"""
 文件位置: core/team/lan_comm.py
 名称: 局域网通信（内网IP检测 + WebSocket 服务端）
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.0
+时间: 2026-05-18
+版本: V1.1.0
 功能及相关说明:
   PC 中控局域网通信模块，Phase 3 核心。
   包含两个类：
     LanInfo   — 本机内网 IP 检测
     WSServer  — PySide6 QWebSocketServer，监听 8889 端口
-                接受安卓脚本 WebSocket 连接，处理认证和消息
+                接受安卓脚本 WebSocket 连接，处理认证和消息。
 
   消息协议（JSON）：
     安卓→PC: type=auth / type=heartbeat / type=task_completed / type=error
     PC→安卓: type=auth_ok / type=auth_failed / type=start_task / type=stop_task / type=params_update
 
+边界说明:
+  - auth 消息中的 device_id 是 Verify 设备编号。
+  - peer_ip 由 PC 中控服务端从 socket 连接读取，不由安卓端自报。
+  - peer_ip 只用于 PC 中控本地 LAN 与 TCP ADB 映射辅助判断，不写入 Verify 绑定主键。
+
 改进内容:
+  V1.1.0 - 认证成功时把 socket peer_ip 写入 info。
   V1.0.0 - 初始版本
 
 调试信息:
@@ -29,7 +35,6 @@ import ipaddress
 import json
 import logging
 import socket
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtNetwork import QHostAddress
@@ -151,7 +156,7 @@ class WSServer(QObject):
         sock = self._server.nextPendingConnection()
         sock.textMessageReceived.connect(lambda msg, s=sock: self._on_message(s, msg))
         sock.disconnected.connect(lambda s=sock: self._on_disconnected(s))
-        logger.debug("WSServer: 新连接 %s", sock.peerAddress().toString())
+        logger.debug("WSServer: 新连接 %s", self._peer_ip(sock))
 
     def _on_message(self, sock, raw: str) -> None:
         try:
@@ -168,10 +173,17 @@ class WSServer(QObject):
                 sock.close()
                 return
             self._connections[device_id] = sock
-            self._sock_to_id[sock]       = device_id
+            self._sock_to_id[sock] = device_id
             self._send(sock, {"type": "auth_ok"})
-            logger.info("WSServer: 设备已认证 device_id=%s", device_id[:16])
-            self.device_connected.emit(device_id, data.get("info", {}))
+
+            info = data.get("info", {})
+            if not isinstance(info, dict):
+                info = {}
+            info = dict(info)
+            info["peer_ip"] = self._peer_ip(sock)
+
+            logger.info("WSServer: 设备已认证 device_id=%s peer_ip=%s", device_id[:16], info.get("peer_ip", ""))
+            self.device_connected.emit(device_id, info)
         else:
             device_id = self._sock_to_id.get(sock)
             if device_id:
@@ -184,6 +196,19 @@ class WSServer(QObject):
             logger.info("WSServer: 设备断开 device_id=%s", device_id[:16])
             self.device_disconnected.emit(device_id)
         sock.deleteLater()
+
+    @staticmethod
+    def _normalize_ip(ip: str) -> str:
+        ip = (ip or "").strip()
+        if ip.startswith("::ffff:"):
+            ip = ip.removeprefix("::ffff:")
+        return ip
+
+    def _peer_ip(self, sock) -> str:
+        try:
+            return self._normalize_ip(sock.peerAddress().toString())
+        except Exception:
+            return ""
 
     # ── 发送 ─────────────────────────────────────
 
