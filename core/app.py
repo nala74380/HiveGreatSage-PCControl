@@ -2,12 +2,14 @@ r"""
 文件位置: core/app.py
 名称: 应用生命周期管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-12
-版本: V1.2.0
+时间: 2026-05-18
+版本: V1.2.1
 功能及相关说明:
   Application 类，管理 QApplication 创建、配置加载、模块初始化和主流程调度。
 
 改进内容:
+  V1.2.1 (2026-05-18)
+    - DeviceManager 构造时注入 AdbManager，用于设备页连接类型/连接标识本地展示。
   V1.2.0 (2026-05-12)
     - 连接 SyncWorker.mock_fallback_used 信号。
     - 当设备列表来自模拟数据时，主线程明确弹窗提示，避免误判为真实 Verify 数据。
@@ -100,7 +102,7 @@ class Application:
         self.auth = AuthManager(self.config)
 
         # ── 设备管理器 ─────────────────────────────────────────
-        self.device_manager = DeviceManager(self.config, self.auth)
+        self.device_manager = DeviceManager(self.config, self.auth, self.adb)
 
         # ── 同步管理器 ─────────────────────────────────────────
         self.sync_manager = SyncManager(self.device_manager, self.auth, self.config)
@@ -258,44 +260,35 @@ class Application:
 
         from PySide6.QtWidgets import QMessageBox
 
-        parent = self._main_window
-        msg = QMessageBox(parent)
-        msg.setWindowTitle("登录状态已失效")
-        msg.setText("您的登录已过期，请重新登录继续使用。")
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.exec()
+        QMessageBox.warning(
+            self._main_window,
+            "登录已过期",
+            "登录状态已过期，请重新登录。",
+        )
 
-        logged_in = self._do_login()
-        if not logged_in:
-            logger.info("用户取消重新登录，退出应用")
+        if self._do_login():
+            self.sync_manager.start()
+        else:
             self._qt_app.quit()
-            return
 
-        self.sync_manager.start()
-        logger.info("重新登录成功，同步已重启")
-
-    def _on_mock_fallback_used(self, message: str) -> None:
-        """收到模拟数据降级信号，记录并在主窗口可用时提示。"""
-        logger.warning("Mock fallback 已启用: %s", message)
-        self._pending_mock_fallback_message = message
+    def _on_mock_fallback_used(self, msg: str) -> None:
+        """SyncWorker 使用模拟设备列表时，在主线程提示用户。"""
+        logger.warning("设备列表使用模拟数据: %s", msg)
+        self._pending_mock_fallback_message = msg
         self._show_pending_mock_fallback_notice()
 
     def _show_pending_mock_fallback_notice(self) -> None:
-        """显示待处理的 mock fallback 提示，避免主窗口创建前丢失提示。"""
-        if not self._pending_mock_fallback_message or self._main_window is None:
+        if not self._main_window or not self._pending_mock_fallback_message:
             return
 
         from PySide6.QtWidgets import QMessageBox
 
-        message = self._pending_mock_fallback_message
+        msg = self._pending_mock_fallback_message
         self._pending_mock_fallback_message = None
-
-        msg = QMessageBox(self._main_window)
-        msg.setWindowTitle("开发模式模拟数据提示")
-        msg.setText(message)
-        msg.setInformativeText(
-            "若要进行真实联调，请关闭 config/local.yaml 中的 "
-            "debug.allow_mock_fallback，并确认 Verify API 可访问。"
+        QMessageBox.warning(
+            self._main_window,
+            "设备列表数据异常",
+            "当前设备列表来自本地模拟数据，不是真实 Verify 数据。\n\n"
+            f"原因：{msg}\n\n"
+            "请检查 Verify API 地址、Token、设备接口和网络配置。",
         )
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.exec()
