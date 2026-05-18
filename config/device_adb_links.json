@@ -1,1 +1,15 @@
-{}
+{
+  "A118": {
+    "device_id": "A118",
+    "adb_serial": "192.168.2.28:5555",
+    "connection_type": "tcp",
+    "connection_label": "192.168.2.28:5555",
+    "match_method": "lan_ip",
+    "match_confidence": "medium",
+    "source": "pccontrol_lan",
+    "verified_at": "2026-05-19T00:35:52",
+    "manual_locked": false,
+    "conflict": false,
+    "note": "LAN peer_ip 192.168.2.28 matched TCP ADB serial 192.168.2.28:5555"
+  }
+}
