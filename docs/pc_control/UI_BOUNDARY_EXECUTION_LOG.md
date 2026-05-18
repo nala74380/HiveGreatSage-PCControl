@@ -161,13 +161,6 @@ P1 当前代码可通过现有 pytest 测试集。
 8af0c81590ce895d2d6d0bfdfc1f245a34f19f67  fix(ui): make select all action explicit
 ```
 
-### 3.7 当前待确认
-
-```text
-全选文字按钮修正后尚需重新执行 compileall / pytest。
-全选文字按钮修正后尚需重新手工点击确认。
-```
-
 ---
 
 ## 4. P2：全局设置拆分
@@ -303,12 +296,44 @@ ui/pages/device_page.py
 c8f89b8db8ac2d1a37234ba0adca8b60474f54f3  refactor(ui): route device edit action to device settings dialog
 ```
 
-### 5.5 待确认
+### 5.5 P3.0 兼容性问题记录
+
+用户反馈运行异常：
 
 ```text
-P3 尚未执行 compileall / pytest。
-P3 尚未执行手工点击验证。
-本地草稿保存路径在 Windows 环境下需确认是否符合预期。
+AttributeError: 'DeviceInfo' object has no attribute 'fingerprint'
+```
+
+已确认根因：
+
+```text
+core/device/models.py 中 DeviceInfo 的真实稳定键为 device_fingerprint。
+P1/P3 重构代码错误使用了不存在的 fingerprint 属性。
+DeviceInfo 也没有 alias 直接属性，本地显示编号应来自 meta.alias 或 device_id。
+```
+
+已修复：
+
+```text
+ui/pages/device_page.py 改为使用 device.device_fingerprint。
+ui/pages/device_page.py 增加 _row_devices 行号到 DeviceInfo 对象映射，不再用截断字符串反查设备。
+ui/dialogs/device_settings_dialog.py 改为使用 device.device_fingerprint。
+ui/dialogs/device_settings_dialog.py 本地元数据页使用 device_manager.get_meta(device_fingerprint) 获取 alias。
+本地草稿 draft_id、device_fingerprint、保存路径均改为基于 device_fingerprint。
+```
+
+修复提交：
+
+```text
+2ed905c728f5dc4aab74231eb1b9de08bd98f013  fix(ui): align device page with DeviceInfo identifiers
+e26da36112203be2f6e4d373517e517566eb0520  fix(ui): align device settings dialog with DeviceInfo identifiers
+```
+
+### 5.6 待确认
+
+```text
+P3 字段兼容修复后尚未执行 compileall / pytest。
+P3 字段兼容修复后尚未执行手工点击验证。
 账号设置页密码显示 / 隐藏 / 复制 / 编辑尚未进入 P4。
 设备设置保存到后端配置接口尚未联调。
 旧 DeviceEditDialog 尚未删除，仅保留为兼容文件。
@@ -331,6 +356,7 @@ python -m compileall -q .
 pytest -q
 启动 PCControl。
 进入设备管理页。
+确认设备列表不再报 DeviceInfo.fingerprint 错误。
 双击设备，确认打开 DeviceSettingsDialog。
 右键设备 -> 编辑 / 设置，确认打开 DeviceSettingsDialog。
 确认页签包含主要设置、账号设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、本地元数据、其他。
