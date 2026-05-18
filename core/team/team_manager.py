@@ -2,13 +2,19 @@ r"""
 文件位置: core/team/team_manager.py
 名称: 组队管理器
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-04-27
-版本: V1.0.0
+时间: 2026-05-18
+版本: V1.1.0
 功能及相关说明:
   管理 WSServer 生命周期 + 维护已连接设备的队伍状态。
   由 Application 持有，Phase 3 使用。
 
+边界说明:
+  - TeamMember.device_id 来自安卓端登录/认证时填写的设备编号。
+  - TeamMember.peer_ip 由 PC 中控 WSServer 从 socket 连接读取，不由安卓端自报。
+  - peer_ip 只用于 PC 中控本地 LAN 与 TCP ADB 映射辅助判断，不写入 Verify 绑定主键。
+
 改进内容:
+  V1.1.0 - TeamMember 保留 peer_ip。
   V1.0.0 - 初始版本（Phase 3 预留接口）
 
 调试信息:
@@ -32,12 +38,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TeamMember:
     """通过 WebSocket 连接的安卓设备成员信息。"""
-    device_id:   str
-    device_name: str  = ""
-    role:        str  = ""    # captain / power / farmer / newbie
-    status:      str  = "idle"
+    device_id: str
+    device_name: str = ""
+    peer_ip: str = ""
+    role: str = ""    # captain / power / farmer / newbie
+    status: str = "idle"
     current_task: str = ""
-    info:        dict = field(default_factory=dict)
+    info: dict = field(default_factory=dict)
 
 
 class TeamManager:
@@ -82,12 +89,13 @@ class TeamManager:
 
     def _on_connected(self, device_id: str, info: dict) -> None:
         member = TeamMember(
-            device_id   = device_id,
-            device_name = info.get("device_name", ""),
-            info        = info,
+            device_id=device_id,
+            device_name=info.get("device_name", ""),
+            peer_ip=info.get("peer_ip", ""),
+            info=info,
         )
         self._members[device_id] = member
-        logger.info("TeamManager: 成员加入 %s", device_id[:12])
+        logger.info("TeamManager: 成员加入 %s peer_ip=%s", device_id[:12], member.peer_ip)
 
     def _on_disconnected(self, device_id: str) -> None:
         self._members.pop(device_id, None)
@@ -95,21 +103,21 @@ class TeamManager:
 
     def _on_message(self, device_id: str, data: dict) -> None:
         msg_type = data.get("type")
-        member   = self._members.get(device_id)
+        member = self._members.get(device_id)
         if not member:
             return
 
         if msg_type == "heartbeat":
-            member.status       = data.get("status", "idle")
+            member.status = data.get("status", "idle")
             member.current_task = data.get("current_task", "")
 
     # ── 指令发送 ──────────────────────────────────
 
     def start_task(self, device_id: str, task_name: str, params: dict | None = None) -> bool:
         return self.ws_server.send_to(device_id, {
-            "type":      "start_task",
+            "type": "start_task",
             "task_name": task_name,
-            "params":    params or {},
+            "params": params or {},
         })
 
     def stop_task(self, device_id: str) -> bool:
