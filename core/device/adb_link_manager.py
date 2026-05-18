@@ -3,8 +3,8 @@ r"""
 名称: ADB 连接映射管理器
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.0
-状态: P3.4-b ADB 映射层骨架
+版本: V1.1.0
+状态: P3.4-c LAN IP 自动匹配
 功能及相关说明:
   管理 device_id 与 PC 本地 ADB serial 的映射关系。
   该映射仅用于 PC 中控本地连接展示与本地操作，不参与 Verify 设备绑定主键。
@@ -14,10 +14,10 @@ r"""
   - adb_serial / connection_label 不上传 Verify 作为绑定依据。
   - 不使用隐藏设备唯一标识。
   - 不把 USB SN / TCP 地址猜测为 device_id。
+  - manual 人工绑定最高优先级，不被 LAN IP 自动匹配覆盖。
   - strict_equal 仅作为最低优先级临时兜底，不写入映射文件。
 
 后续阶段:
-  - P3.4-c：接入 LAN WebSocket peer_ip 与 TCP ADB IP 匹配。
   - P3.4-d：通过 ADB 读取安卓端 /sdcard/HiveGreatSage/device_identity.json。
   - P3.4-e：设备设置页增加人工绑定 UI。
 """
@@ -29,9 +29,10 @@ import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
+    from core.team.team_manager import TeamMember
     from core.utils.adb_manager import AdbManager, DeviceInfo as AdbDeviceInfo
 
 logger = logging.getLogger(__name__)
@@ -72,11 +73,11 @@ class AdbLinkManager:
         """
         返回 device_id -> AdbConnectionLink。
 
-        当前 P3.4-b 支持：
-          1. 本地已保存人工映射 manual。
+        当前支持：
+          1. 本地已保存映射：manual / lan_ip。
           2. strict_equal 兜底：device_id 与 adb serial 完全相等时临时生成连接展示。
 
-        注意：strict_equal 不持久化，不覆盖 manual。
+        注意：strict_equal 不持久化，不覆盖已保存映射。
         """
         requested = [device_id for device_id in device_ids if device_id]
         result: dict[str, AdbConnectionLink] = {}
@@ -101,6 +102,104 @@ class AdbLinkManager:
         except Exception as exc:
             logger.warning("ADB 设备列表查询失败: %s", exc)
             return []
+
+    # ── LAN IP 自动匹配 ─────────────────────────────
+
+    def refresh_lan_ip_links(self, members: Iterable["TeamMember"]) -> dict[str, AdbConnectionLink]:
+        """
+        根据 LAN WebSocket peer_ip 与 TCP ADB serial(ip:port) 刷新 lan_ip 映射。
+
+        规则：
+          - 只处理带 peer_ip 的 TeamMember。
+          - 只匹配 TCP ADB serial，例如 192.168.2.28:5555。
+          - 同一 IP 对应多个 device_id 或多个 adb_serial 时标记冲突，不自动写入。
+          - 不覆盖 manual_locked=true 的人工绑定。
+          - 可覆盖旧的 lan_ip / strict_equal 保存映射。
+        """
+        member_by_ip: dict[str, list["TeamMember"]] = {}
+        for member in members:
+            ip = self._normalize_ip(getattr(member, "peer_ip", ""))
+            device_id = getattr(member, "device_id", "")
+            if not ip or not device_id:
+                continue
+            member_by_ip.setdefault(ip, []).append(member)
+
+        adb_by_ip: dict[str, list["AdbDeviceInfo"]] = {}
+        for adb_device in self.list_adb_devices():
+            serial = getattr(adb_device, "serial", "")
+            ip = self._adb_serial_ip(serial)
+            if not ip:
+                continue
+            adb_by_ip.setdefault(ip, []).append(adb_device)
+
+        changed = False
+        refreshed: dict[str, AdbConnectionLink] = {}
+        for ip, ip_members in member_by_ip.items():
+            adb_devices = adb_by_ip.get(ip, [])
+            if len(ip_members) != 1 or len(adb_devices) != 1:
+                self._mark_ip_conflicts(ip_members, adb_devices, ip)
+                changed = True
+                continue
+
+            member = ip_members[0]
+            adb_device = adb_devices[0]
+            device_id = member.device_id
+            existing = self._links.get(device_id)
+            if existing is not None and existing.manual_locked:
+                continue
+
+            serial = getattr(adb_device, "serial", "")
+            link = AdbConnectionLink(
+                device_id=device_id,
+                adb_serial=serial,
+                connection_type="tcp",
+                connection_label=serial,
+                match_method="lan_ip",
+                match_confidence="medium",
+                source="pccontrol_lan",
+                verified_at=self._now(),
+                manual_locked=False,
+                conflict=False,
+                note=f"LAN peer_ip {ip} matched TCP ADB serial {serial}",
+            )
+            self._links[device_id] = link
+            refreshed[device_id] = link
+            changed = True
+
+        if changed:
+            self._save_links()
+        return refreshed
+
+    def _mark_ip_conflicts(
+        self,
+        members: list["TeamMember"],
+        adb_devices: list["AdbDeviceInfo"],
+        ip: str,
+    ) -> None:
+        """记录 LAN IP 匹配冲突，不自动绑定。"""
+        if not members or not adb_devices:
+            return
+        device_ids = [m.device_id for m in members if m.device_id]
+        adb_serials = [getattr(d, "serial", "") for d in adb_devices if getattr(d, "serial", "")]
+        note = f"LAN IP {ip} conflict: device_ids={device_ids}, adb_serials={adb_serials}"
+        for device_id in device_ids:
+            existing = self._links.get(device_id)
+            if existing is not None and existing.manual_locked:
+                continue
+            self._links[device_id] = AdbConnectionLink(
+                device_id=device_id,
+                adb_serial=adb_serials[0] if len(adb_serials) == 1 else "",
+                connection_type="tcp",
+                connection_label=adb_serials[0] if len(adb_serials) == 1 else "",
+                match_method="lan_ip",
+                match_confidence="conflict",
+                source="pccontrol_lan",
+                verified_at=self._now(),
+                manual_locked=False,
+                conflict=True,
+                note=note,
+            )
+        logger.warning("ADB LAN IP 映射冲突: %s", note)
 
     # ── 人工绑定 ──────────────────────────────────
 
@@ -195,6 +294,20 @@ class AdbLinkManager:
     @staticmethod
     def _now() -> str:
         return datetime.now().isoformat(timespec="seconds")
+
+    @staticmethod
+    def _normalize_ip(ip: str) -> str:
+        ip = (ip or "").strip()
+        if ip.startswith("::ffff:"):
+            ip = ip.removeprefix("::ffff:")
+        return ip
+
+    @classmethod
+    def _adb_serial_ip(cls, adb_serial: str) -> str:
+        if not adb_serial or ":" not in adb_serial:
+            return ""
+        host = adb_serial.rsplit(":", 1)[0]
+        return cls._normalize_ip(host)
 
     @staticmethod
     def _infer_connection_type(adb_serial: str) -> str:
