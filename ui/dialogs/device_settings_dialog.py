@@ -3,13 +3,13 @@ r"""
 名称: 设备设置弹窗
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-19
-版本: V1.2.0
-状态: P4 账号设置页密码行为第一轮
+版本: V1.3.0
+状态: P4 账号设置页 Ymir-CC 风格重整
 功能及相关说明:
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
   P3.4-e 新增“本机 ADB 连接”页，用于人工绑定 device_id 与 PC 本机 adb_serial。
-  P4 引入 AccountSettingsPage 与 PasswordEditor，账号设置页支持密码默认隐藏、显示、隐藏、复制、编辑。
+  P4 引入 AccountSettingsPage 与 PasswordEditor，账号设置页按 Ymir-CC 风格使用账号表格。
 
 边界说明:
   - 游戏账号设置属于本弹窗。
@@ -17,7 +17,7 @@ r"""
   - 后端配置保存接口未联调前，不得声称云端配置闭环已完成。
   - ADB 绑定只写入 PC 中控本地 device_adb_links.json，不写 Verify 绑定主键。
   - adb_serial / connection_label 不上传 Verify 作为设备唯一性依据。
-  - 真实游戏密码不得写入日志、状态栏、普通诊断包、普通本地草稿 JSON。
+  - 真实游戏密码、邮箱密码不得写入日志、状态栏、普通诊断包、普通本地草稿 JSON。
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ class DeviceSettingsDialog(QDialog):
         footer_lay.addWidget(reset_page_btn)
         footer_lay.addWidget(reset_all_btn)
         footer_lay.addSpacing(12)
-        self._status_label = QLabel("P4：账号设置页密码行为第一轮；后端配置接口待联调。")
+        self._status_label = QLabel("P4：账号设置页 Ymir-CC 风格重整；后端配置接口待联调。")
         self._status_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
         footer_lay.addWidget(self._status_label)
         footer_lay.addStretch()
@@ -457,13 +457,7 @@ class DeviceSettingsDialog(QDialog):
                 "mainline_mode": self._mainline_mode.currentData(),
                 "dungeon_mode": self._dungeon_mode.currentData(),
             },
-            "account_settings": {
-                "source": account_draft.source,
-                "account": account_draft.account,
-                "password_present": account_draft.password_present,
-                "email": account_draft.email,
-                "region": account_draft.region,
-            },
+            "account_settings": account_draft.to_dict(),
             "task_settings": {
                 "task_profile": self._task_profile.text().strip(),
                 "task_note": self._task_note.toPlainText().strip(),
