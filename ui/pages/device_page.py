@@ -3,11 +3,12 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.0
-状态: P1 UI 边界重构执行中
+版本: V1.1.0
+状态: P3 UI 边界重构执行中
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
+  P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -348,8 +349,8 @@ class DevicePage(QWidget):
         dlg.exec()
 
     def _open_edit_dialog(self, dev: DeviceInfo) -> None:
-        from ui.widgets.device_edit_dialog import DeviceEditDialog
-        dlg = DeviceEditDialog(dev, self._app.device_manager, self)
+        from ui.dialogs.device_settings_dialog import DeviceSettingsDialog
+        dlg = DeviceSettingsDialog(self._app, dev, self)
         dlg.meta_saved.connect(lambda _: self._apply_filters())
         dlg.exec()
 
