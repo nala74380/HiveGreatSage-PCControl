@@ -3,8 +3,8 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.5.0
-状态: P5-b 批量设置入口切换
+版本: V1.6.0
+状态: P5 批量设置搁置，等待基于 DeviceSettingsDialog 重构
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
@@ -12,7 +12,7 @@ r"""
   P3.4-c：LAN 成员变化时刷新 AdbLinkManager 的 LAN IP 映射，并更新连接标识展示。
   P3.4-d：Verify 设备列表刷新后尝试读取安卓端公开 identity 文件，生成 adb_identity 高可信映射。
   P3.4-e：设备设置弹窗人工绑定 / 解绑 ADB 后，刷新设备表连接标识。
-  P5-b：批量设置入口切换到 ui.dialogs.batch_settings_dialog.BatchSettingsDialog。
+  P5：当前批量设置独立弹窗方案已搁置；后续必须基于 DeviceSettingsDialog 的批量模式重构。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -409,10 +409,13 @@ class DevicePage(QWidget):
         if not selected:
             QMessageBox.information(self, "提示", "请先勾选要批量操作的设备")
             return
-        from ui.dialogs.batch_settings_dialog import BatchSettingsDialog
-        dlg = BatchSettingsDialog(selected, self._app.device_manager, self)
-        dlg.batch_apply.connect(lambda _: self._apply_filters())
-        dlg.exec()
+        QMessageBox.information(
+            self,
+            "批量设置已搁置",
+            "当前批量设置独立弹窗方案已删除。\n\n"
+            "后续 P5 将基于单设备 DeviceSettingsDialog 重构为批量设备设置模式，"
+            "保持同一套页签、字段模型和配置语义。",
+        )
 
     def _open_edit_dialog(self, dev: DeviceInfo) -> None:
         from ui.dialogs.device_settings_dialog import DeviceSettingsDialog
