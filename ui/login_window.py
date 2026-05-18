@@ -352,7 +352,7 @@ class LoginWindow(QDialog):
         root.addStretch()
 
         # ── 版本号 ──
-        ver = QLabel("v1.0.0 · 椰芽专用版")
+        ver = QLabel("v1.0.0 · 夜鸦专用版")
         ver.setObjectName("version-label")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(ver)
@@ -371,7 +371,7 @@ class LoginWindow(QDialog):
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        subtitle = QLabel("PC 中控  ·  椰芽")
+        subtitle = QLabel("PC 中控  ·  夜鸦")
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
