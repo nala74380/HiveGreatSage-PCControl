@@ -3,18 +3,19 @@ r"""
 名称: 设备设置弹窗
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.0.1
-状态: P3 UI 边界重构执行中
+版本: V1.1.0
+状态: P3.4-e ADB 人工绑定 UI
 功能及相关说明:
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
-  P3 第一轮仅建立骨架、页签结构、本地草稿提示和本地元数据兼容页。
-  V1.0.1 修复：对齐 DeviceInfo 真实字段 device_id。
+  P3.4-e 新增“本机 ADB 连接”页，用于人工绑定 device_id 与 PC 本机 adb_serial。
 
 边界说明:
   - 游戏账号设置属于本弹窗，当前只做页签骨架，不实现密码表格。
   - 本地 profile 只作为草稿/缓存，不是最终真相源。
   - 后端配置保存接口未联调前，不得声称云端配置闭环已完成。
+  - ADB 绑定只写入 PC 中控本地 device_adb_links.json，不写 Verify 绑定主键。
+  - adb_serial / connection_label 不上传 Verify 作为设备唯一性依据。
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTabWidget,
     QTextEdit,
@@ -133,6 +135,7 @@ class DeviceSettingsDialog(QDialog):
     """单设备游戏运行配置弹窗。"""
 
     meta_saved = Signal(str)
+    adb_link_changed = Signal(str)
 
     def __init__(self, app: "Application", device: "DeviceInfo", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -178,6 +181,7 @@ class DeviceSettingsDialog(QDialog):
         self._tabs.addTab(self._placeholder_page("交易设置", "交易策略页签骨架，P3 不实现具体字段。"), "交易设置")
         self._tabs.addTab(self._placeholder_page("制造设置", "制造策略页签骨架，P3 不实现具体字段。"), "制造设置")
         self._tabs.addTab(self._placeholder_page("铸币设置", "铸币策略页签骨架，P3 不实现具体字段。"), "铸币设置")
+        self._tabs.addTab(self._build_adb_page(), "本机 ADB 连接")
         self._tabs.addTab(self._build_meta_page(), "本地元数据")
         self._tabs.addTab(self._placeholder_page("其他游戏参数", "其他游戏参数页签骨架，P3 不实现具体字段。"), "其他")
         root.addWidget(self._tabs)
@@ -276,9 +280,57 @@ class DeviceSettingsDialog(QDialog):
         lay.addStretch()
         return page
 
+    def _build_adb_page(self) -> QWidget:
+        page, lay = self._page()
+        self._section(lay, "本机 ADB 连接")
+        lay.addWidget(self._hint("本页只维护 PC 中控本地 device_id -> adb_serial 映射。该映射不上传 Verify，不改变设备绑定主键。"))
+
+        form = self._form()
+        self._adb_device_id = QLineEdit(_device_key(self._device))
+        self._adb_device_id.setReadOnly(True)
+        form.addRow("设备编号", self._adb_device_id)
+
+        self._adb_current_label = QLineEdit()
+        self._adb_current_label.setReadOnly(True)
+        form.addRow("当前绑定", self._adb_current_label)
+
+        self._adb_source_label = QLineEdit()
+        self._adb_source_label.setReadOnly(True)
+        form.addRow("匹配方式", self._adb_source_label)
+
+        self._adb_combo = QComboBox()
+        form.addRow("可选 ADB 设备", self._adb_combo)
+        lay.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        refresh_btn = QPushButton("刷新 ADB 设备")
+        refresh_btn.clicked.connect(self._refresh_adb_devices)
+        bind_btn = QPushButton("绑定选中 ADB 设备")
+        bind_btn.setObjectName("save-btn")
+        bind_btn.clicked.connect(self._bind_selected_adb)
+        unbind_btn = QPushButton("解除本机绑定")
+        unbind_btn.setObjectName("warn-btn")
+        unbind_btn.clicked.connect(self._unbind_adb)
+        identity_btn = QPushButton("读取 identity 文件")
+        identity_btn.clicked.connect(self._try_read_identity)
+        btn_row.addWidget(refresh_btn)
+        btn_row.addWidget(bind_btn)
+        btn_row.addWidget(unbind_btn)
+        btn_row.addWidget(identity_btn)
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
+
+        lay.addWidget(self._hint("人工绑定优先级最高，会写入 config/device_adb_links.json。identity / LAN IP 自动匹配不会覆盖人工绑定。"))
+        lay.addWidget(self._hint("identity 文件路径：/sdcard/HiveGreatSage/device_identity.json；不得包含账号密码、token、游戏密码。"))
+        lay.addStretch()
+
+        self._refresh_adb_binding_status()
+        self._refresh_adb_devices()
+        return page
+
     def _build_meta_page(self) -> QWidget:
         page, lay = self._page()
-        self._section(lay, "本地元数据兼容页")
+        self._section(lay, "本地元数据")
         form = self._form()
         self._alias_edit = QLineEdit(self._meta.get("alias", self._device.device_id))
         form.addRow("显示编号", self._alias_edit)
@@ -313,6 +365,91 @@ class DeviceSettingsDialog(QDialog):
         lay.addWidget(self._hint("该页属于设备设置 / 游戏运行配置，不属于全局设置。"))
         lay.addStretch()
         return page
+
+    # ── ADB Link ──────────────────────────────────
+
+    def _refresh_adb_devices(self) -> None:
+        if not hasattr(self, "_adb_combo"):
+            return
+        self._adb_combo.clear()
+        adb_links = getattr(self._app, "adb_links", None)
+        if adb_links is None:
+            self._adb_combo.addItem("ADB 映射管理器不可用", "")
+            return
+        devices = adb_links.list_adb_devices()
+        if not devices:
+            self._adb_combo.addItem("未发现 ADB 设备", "")
+            return
+        for dev in devices:
+            serial = getattr(dev, "serial", "")
+            state = getattr(dev, "state", "")
+            model = getattr(dev, "model", "") or "—"
+            mode = getattr(getattr(dev, "mode", None), "name", "").lower() or ("tcp" if ":" in serial else "usb")
+            self._adb_combo.addItem(f"[{mode}] {serial}  {model}  ({state})", serial)
+
+    def _refresh_adb_binding_status(self) -> None:
+        if not hasattr(self, "_adb_current_label"):
+            return
+        adb_links = getattr(self._app, "adb_links", None)
+        device_id = _device_key(self._device)
+        if adb_links is None:
+            self._adb_current_label.setText("ADB 映射管理器不可用")
+            self._adb_source_label.setText("—")
+            return
+        link = adb_links.get_saved_link(device_id)
+        if link is None:
+            self._adb_current_label.setText("未绑定")
+            self._adb_source_label.setText("—")
+            return
+        status = "冲突" if link.conflict else "已绑定"
+        self._adb_current_label.setText(f"{status}: {link.connection_label or link.adb_serial}")
+        self._adb_source_label.setText(f"{link.match_method} / {link.match_confidence}")
+
+    def _bind_selected_adb(self) -> None:
+        adb_links = getattr(self._app, "adb_links", None)
+        if adb_links is None:
+            QMessageBox.warning(self, "ADB 绑定失败", "ADB 映射管理器不可用。")
+            return
+        serial = self._adb_combo.currentData() if hasattr(self, "_adb_combo") else ""
+        if not serial:
+            QMessageBox.information(self, "提示", "请先选择一个 ADB 设备。")
+            return
+        device_id = _device_key(self._device)
+        adb_links.bind_manual(device_id, serial, note="Manual bind from DeviceSettingsDialog")
+        logger.info("设备 ADB 人工绑定: %s -> %s", device_id, serial)
+        self._refresh_adb_binding_status()
+        self.adb_link_changed.emit(device_id)
+        self._status(f"已绑定本机 ADB 设备：{serial}", ok=True)
+
+    def _unbind_adb(self) -> None:
+        adb_links = getattr(self._app, "adb_links", None)
+        if adb_links is None:
+            QMessageBox.warning(self, "ADB 解绑失败", "ADB 映射管理器不可用。")
+            return
+        device_id = _device_key(self._device)
+        adb_links.unbind(device_id)
+        logger.info("设备 ADB 本机绑定已解除: %s", device_id)
+        self._refresh_adb_binding_status()
+        self.adb_link_changed.emit(device_id)
+        self._status("本机 ADB 绑定已解除。", ok=True)
+
+    def _try_read_identity(self) -> None:
+        adb_links = getattr(self._app, "adb_links", None)
+        if adb_links is None:
+            QMessageBox.warning(self, "读取失败", "ADB 映射管理器不可用。")
+            return
+        device_id = _device_key(self._device)
+        project_uuid = ""
+        config = getattr(self._app, "config", None)
+        if config is not None:
+            project_uuid = str(config.get("server.project_uuid", "") or "")
+        result = adb_links.refresh_identity_links([device_id], project_uuid=project_uuid)
+        self._refresh_adb_binding_status()
+        self.adb_link_changed.emit(device_id)
+        if device_id in result:
+            self._status("已通过 ADB identity 文件确认连接映射。", ok=True)
+        else:
+            self._status("未从已连接 ADB 设备读取到匹配 identity 文件。", ok=False)
 
     # ── Save ──────────────────────────────────────
 
