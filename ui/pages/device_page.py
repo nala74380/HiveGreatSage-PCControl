@@ -3,13 +3,14 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.2.0
-状态: P3.4-c LAN IP 自动匹配
+版本: V1.3.0
+状态: P3.4-d ADB identity 文件读取
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
   P3.4-c：LAN 成员变化时刷新 AdbLinkManager 的 LAN IP 映射，并更新连接标识展示。
+  P3.4-d：Verify 设备列表刷新后尝试读取安卓端公开 identity 文件，生成 adb_identity 高可信映射。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -242,6 +243,8 @@ class DevicePage(QWidget):
 
     def refresh_devices(self, devices: list[DeviceInfo]) -> None:
         self._devices = devices
+        self._refresh_identity_links()
+        self._refresh_device_adb_fields()
         self._apply_filters()
         self._refresh_lan_members(update_links=False)
 
@@ -315,6 +318,16 @@ class DevicePage(QWidget):
         win = self.window()
         if hasattr(win, "update_stats"):
             win.update_stats(len(self._devices), online)
+
+    def _refresh_identity_links(self) -> None:
+        adb_links_manager = getattr(self._app, "adb_links", None)
+        if adb_links_manager is None or not self._devices:
+            return
+        project_uuid = ""
+        config = getattr(self._app, "config", None)
+        if config is not None:
+            project_uuid = str(config.get("server.project_uuid", "") or "")
+        adb_links_manager.refresh_identity_links([d.device_id for d in self._devices], project_uuid=project_uuid)
 
     def _refresh_lan_members(self, update_links: bool = False) -> None:
         team_manager = getattr(self._app, "team_manager", None)
