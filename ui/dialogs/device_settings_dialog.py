@@ -2,20 +2,22 @@ r"""
 文件位置: ui/dialogs/device_settings_dialog.py
 名称: 设备设置弹窗
 作者: 蜂巢·大圣 (HiveGreatSage)
-时间: 2026-05-18
-版本: V1.1.0
-状态: P3.4-e ADB 人工绑定 UI
+时间: 2026-05-19
+版本: V1.2.0
+状态: P4 账号设置页密码行为第一轮
 功能及相关说明:
   单设备游戏运行配置入口。
   本弹窗承载设备设置，不承载全局设置。
   P3.4-e 新增“本机 ADB 连接”页，用于人工绑定 device_id 与 PC 本机 adb_serial。
+  P4 引入 AccountSettingsPage 与 PasswordEditor，账号设置页支持密码默认隐藏、显示、隐藏、复制、编辑。
 
 边界说明:
-  - 游戏账号设置属于本弹窗，当前只做页签骨架，不实现密码表格。
+  - 游戏账号设置属于本弹窗。
   - 本地 profile 只作为草稿/缓存，不是最终真相源。
   - 后端配置保存接口未联调前，不得声称云端配置闭环已完成。
   - ADB 绑定只写入 PC 中控本地 device_adb_links.json，不写 Verify 绑定主键。
   - adb_serial / connection_label 不上传 Verify 作为设备唯一性依据。
+  - 真实游戏密码不得写入日志、状态栏、普通诊断包、普通本地草稿 JSON。
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.dialogs.device_settings.pages.account_settings_page import AccountSettingsPage
 from ui.styles.colors import (
     BG_MAIN,
     BG_PANEL,
@@ -162,9 +165,9 @@ class DeviceSettingsDialog(QDialog):
         title.setStyleSheet(f"color:{TEXT}; font-size:13px; font-weight:600;")
         header_lay.addWidget(title)
         header_lay.addSpacing(12)
-        fp = QLabel(_device_key(self._device))
-        fp.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
-        header_lay.addWidget(fp)
+        device_id_label = QLabel(_device_key(self._device))
+        device_id_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
+        header_lay.addWidget(device_id_label)
         header_lay.addStretch()
         close_btn = QPushButton("×")
         close_btn.setStyleSheet(f"border:none; background:transparent; color:{TEXT_MUTE}; font-size:18px;")
@@ -174,7 +177,9 @@ class DeviceSettingsDialog(QDialog):
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_main_page(), "主要设置")
-        self._tabs.addTab(self._build_account_page(), "账号设置")
+        self._account_page = AccountSettingsPage()
+        self._account_page.status_message.connect(self._status)
+        self._tabs.addTab(self._account_page, "账号设置")
         self._tabs.addTab(self._build_task_page(), "任务设置")
         self._tabs.addTab(self._placeholder_page("物品处理", "游戏物品处理策略页签骨架，P3 不实现具体字段。"), "物品处理")
         self._tabs.addTab(self._placeholder_page("购买设置", "购买补给策略页签骨架，P3 不实现具体字段。"), "购买设置")
@@ -199,7 +204,7 @@ class DeviceSettingsDialog(QDialog):
         footer_lay.addWidget(reset_page_btn)
         footer_lay.addWidget(reset_all_btn)
         footer_lay.addSpacing(12)
-        self._status_label = QLabel("P3 骨架：本地草稿可保存；后端配置接口待联调。")
+        self._status_label = QLabel("P4：账号设置页密码行为第一轮；后端配置接口待联调。")
         self._status_label.setStyleSheet(f"color:{TEXT_MUTE}; font-size:10px;")
         footer_lay.addWidget(self._status_label)
         footer_lay.addStretch()
@@ -236,31 +241,6 @@ class DeviceSettingsDialog(QDialog):
         form.addRow("副本设置", self._dungeon_mode)
         lay.addLayout(form)
         lay.addWidget(self._hint("P3 第一轮只建立字段骨架；具体游戏含义由游戏 fork 后续定义。"))
-        lay.addStretch()
-        return page
-
-    def _build_account_page(self) -> QWidget:
-        page, lay = self._page()
-        self._section(lay, "游戏账号设置")
-        lay.addWidget(self._hint("账号设置页里的账号是游戏账号，不是 PC 登录账号。当前 P3 只建立入口；密码显示/隐藏/复制/编辑属于 P4。"))
-        form = self._form()
-        self._account_source = QComboBox()
-        self._account_source.addItem("手动输入", "manual")
-        self._account_source.addItem("客户外部账号数据库", "external_db")
-        form.addRow("账号来源", self._account_source)
-        self._game_account = QLineEdit()
-        self._game_account.setPlaceholderText("游戏账号（P4 后续完善账号表格）")
-        form.addRow("游戏账号", self._game_account)
-        self._game_password = QLineEdit()
-        self._game_password.setPlaceholderText("游戏密码（默认隐藏，P4 实现显示/隐藏）")
-        self._game_password.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("游戏密码", self._game_password)
-        self._game_email = QLineEdit()
-        form.addRow("验证邮箱", self._game_email)
-        self._game_region = QLineEdit()
-        form.addRow("区服", self._game_region)
-        lay.addLayout(form)
-        lay.addWidget(self._hint("当前只允许两类账号来源：手动输入、客户外部账号数据库。不得加入无证据账号来源。"))
         lay.addStretch()
         return page
 
@@ -461,6 +441,7 @@ class DeviceSettingsDialog(QDialog):
 
     def _save_draft(self, scope: str) -> None:
         device_key = _device_key(self._device)
+        account_draft = self._account_page.draft()
         draft = {
             "draft_id": f"device-{device_key[:12]}",
             "device_id": device_key,
@@ -470,18 +451,18 @@ class DeviceSettingsDialog(QDialog):
             "synced_at": None,
             "remote_version": None,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
-            "note": "P3 本地草稿；不是最终真相源；后端配置接口待联调。",
+            "note": "P4 本地草稿；不是最终真相源；后端配置接口待联调；真实密码不写入普通草稿。",
             "main_settings": {
                 "run_mode": self._run_mode.currentData(),
                 "mainline_mode": self._mainline_mode.currentData(),
                 "dungeon_mode": self._dungeon_mode.currentData(),
             },
             "account_settings": {
-                "source": self._account_source.currentData(),
-                "account": self._game_account.text().strip(),
-                "password_present": bool(self._game_password.text()),
-                "email": self._game_email.text().strip(),
-                "region": self._game_region.text().strip(),
+                "source": account_draft.source,
+                "account": account_draft.account,
+                "password_present": account_draft.password_present,
+                "email": account_draft.email,
+                "region": account_draft.region,
             },
             "task_settings": {
                 "task_profile": self._task_profile.text().strip(),
