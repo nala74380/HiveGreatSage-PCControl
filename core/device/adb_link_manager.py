@@ -3,8 +3,8 @@ r"""
 名称: ADB 连接映射管理器
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.1.0
-状态: P3.4-c LAN IP 自动匹配
+版本: V1.2.0
+状态: P3.4-d ADB identity 文件读取
 功能及相关说明:
   管理 device_id 与 PC 本地 ADB serial 的映射关系。
   该映射仅用于 PC 中控本地连接展示与本地操作，不参与 Verify 设备绑定主键。
@@ -14,11 +14,12 @@ r"""
   - adb_serial / connection_label 不上传 Verify 作为绑定依据。
   - 不使用隐藏设备唯一标识。
   - 不把 USB SN / TCP 地址猜测为 device_id。
-  - manual 人工绑定最高优先级，不被 LAN IP 自动匹配覆盖。
+  - manual 人工绑定最高优先级，不被自动匹配覆盖。
+  - adb_identity 高可信，但不覆盖 manual_locked=true。
+  - lan_ip 中可信，不覆盖 manual / adb_identity。
   - strict_equal 仅作为最低优先级临时兜底，不写入映射文件。
 
 后续阶段:
-  - P3.4-d：通过 ADB 读取安卓端 /sdcard/HiveGreatSage/device_identity.json。
   - P3.4-e：设备设置页增加人工绑定 UI。
 """
 
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _PROJ_ROOT = Path(__file__).resolve().parents[2]
 _LINK_FILE = _PROJ_ROOT / "config" / "device_adb_links.json"
+IDENTITY_PATH = "/sdcard/HiveGreatSage/device_identity.json"
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,7 @@ class AdbLinkManager:
         返回 device_id -> AdbConnectionLink。
 
         当前支持：
-          1. 本地已保存映射：manual / lan_ip。
+          1. 本地已保存映射：manual / adb_identity / lan_ip。
           2. strict_equal 兜底：device_id 与 adb serial 完全相等时临时生成连接展示。
 
         注意：strict_equal 不持久化，不覆盖已保存映射。
@@ -103,6 +105,133 @@ class AdbLinkManager:
             logger.warning("ADB 设备列表查询失败: %s", exc)
             return []
 
+    # ── ADB identity 自动确认 ──────────────────────
+
+    def refresh_identity_links(
+        self,
+        known_device_ids: Iterable[str],
+        project_uuid: str = "",
+    ) -> dict[str, AdbConnectionLink]:
+        """
+        通过 ADB 读取安卓端公开身份文件，刷新 adb_identity 映射。
+
+        读取路径：/sdcard/HiveGreatSage/device_identity.json
+
+        文件示例：
+            {
+              "device_id": "A118",
+              "project_uuid": "...",
+              "client": "HiveGreatSage-AndroidScript"
+            }
+
+        规则：
+          - 只接受 known_device_ids 中存在的 device_id。
+          - project_uuid 非空时必须一致。
+          - 不覆盖 manual_locked=true。
+          - 可覆盖 lan_ip / strict_equal / 旧 adb_identity。
+          - 同一 adb_serial 读取不到或 JSON 异常时跳过。
+        """
+        known = {device_id for device_id in known_device_ids if device_id}
+        if not known:
+            return {}
+
+        changed = False
+        refreshed: dict[str, AdbConnectionLink] = {}
+        seen_serial_by_device_id: dict[str, str] = {}
+
+        for adb_device in self.list_adb_devices():
+            serial = getattr(adb_device, "serial", "")
+            if not serial:
+                continue
+            payload = self._read_identity_payload(serial)
+            if payload is None:
+                continue
+            device_id = str(payload.get("device_id", "")).strip()
+            if not device_id or device_id not in known:
+                logger.debug("ADB identity 跳过未知 device_id: serial=%s device_id=%s", serial, device_id)
+                continue
+
+            payload_project_uuid = str(payload.get("project_uuid", "")).strip()
+            if project_uuid and payload_project_uuid and payload_project_uuid != project_uuid:
+                logger.warning(
+                    "ADB identity project_uuid 不一致，跳过: serial=%s device_id=%s payload=%s expected=%s",
+                    serial,
+                    device_id,
+                    payload_project_uuid,
+                    project_uuid,
+                )
+                continue
+
+            if device_id in seen_serial_by_device_id and seen_serial_by_device_id[device_id] != serial:
+                self._mark_identity_conflict(device_id, [seen_serial_by_device_id[device_id], serial])
+                changed = True
+                continue
+            seen_serial_by_device_id[device_id] = serial
+
+            existing = self._links.get(device_id)
+            if existing is not None and existing.manual_locked:
+                continue
+
+            link = AdbConnectionLink(
+                device_id=device_id,
+                adb_serial=serial,
+                connection_type=self._connection_type_from_adb_device(adb_device),
+                connection_label=serial,
+                match_method="adb_identity",
+                match_confidence="high",
+                source="android_identity_file",
+                verified_at=self._now(),
+                manual_locked=False,
+                conflict=False,
+                note=f"Read {IDENTITY_PATH} via ADB; client={payload.get('client', '')}",
+            )
+            self._links[device_id] = link
+            refreshed[device_id] = link
+            changed = True
+
+        if changed:
+            self._save_links()
+        return refreshed
+
+    def _read_identity_payload(self, adb_serial: str) -> dict | None:
+        if self._adb is None:
+            return None
+        result = self._adb.shell(adb_serial, f"cat {IDENTITY_PATH}")
+        if not result.success or not result.stdout:
+            return None
+        text = result.stdout.strip()
+        if not text.startswith("{"):
+            logger.debug("ADB identity 输出不是 JSON: serial=%s output=%s", adb_serial, text[:80])
+            return None
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            logger.warning("ADB identity JSON 解析失败: serial=%s err=%s", adb_serial, exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _mark_identity_conflict(self, device_id: str, adb_serials: list[str]) -> None:
+        existing = self._links.get(device_id)
+        if existing is not None and existing.manual_locked:
+            return
+        note = f"ADB identity conflict: device_id={device_id}, adb_serials={adb_serials}"
+        self._links[device_id] = AdbConnectionLink(
+            device_id=device_id,
+            adb_serial=adb_serials[0] if adb_serials else "",
+            connection_type=self._infer_connection_type(adb_serials[0]) if adb_serials else "",
+            connection_label=adb_serials[0] if adb_serials else "",
+            match_method="adb_identity",
+            match_confidence="conflict",
+            source="android_identity_file",
+            verified_at=self._now(),
+            manual_locked=False,
+            conflict=True,
+            note=note,
+        )
+        logger.warning("ADB identity 映射冲突: %s", note)
+
     # ── LAN IP 自动匹配 ─────────────────────────────
 
     def refresh_lan_ip_links(self, members: Iterable["TeamMember"]) -> dict[str, AdbConnectionLink]:
@@ -114,7 +243,8 @@ class AdbLinkManager:
           - 只匹配 TCP ADB serial，例如 192.168.2.28:5555。
           - 同一 IP 对应多个 device_id 或多个 adb_serial 时标记冲突，不自动写入。
           - 不覆盖 manual_locked=true 的人工绑定。
-          - 可覆盖旧的 lan_ip / strict_equal 保存映射。
+          - 不覆盖 adb_identity 高可信映射。
+          - 可覆盖旧的 lan_ip 映射。
         """
         member_by_ip: dict[str, list["TeamMember"]] = {}
         for member in members:
@@ -145,7 +275,7 @@ class AdbLinkManager:
             adb_device = adb_devices[0]
             device_id = member.device_id
             existing = self._links.get(device_id)
-            if existing is not None and existing.manual_locked:
+            if existing is not None and (existing.manual_locked or existing.match_method == "adb_identity"):
                 continue
 
             serial = getattr(adb_device, "serial", "")
@@ -184,7 +314,7 @@ class AdbLinkManager:
         note = f"LAN IP {ip} conflict: device_ids={device_ids}, adb_serials={adb_serials}"
         for device_id in device_ids:
             existing = self._links.get(device_id)
-            if existing is not None and existing.manual_locked:
+            if existing is not None and (existing.manual_locked or existing.match_method == "adb_identity"):
                 continue
             self._links[device_id] = AdbConnectionLink(
                 device_id=device_id,
