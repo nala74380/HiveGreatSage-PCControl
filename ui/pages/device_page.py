@@ -3,13 +3,14 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.1.1
+版本: V1.2.0
 状态: P3 UI 边界重构执行中
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
   V1.1.1 修复：对齐 DeviceInfo 真实字段 device_fingerprint，不再使用不存在的 fingerprint 属性。
+  V1.2.0：右侧侧栏接入 TeamManager.members，显示 LAN 在线成员摘要。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -23,7 +24,6 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -116,7 +116,7 @@ class ActivateWorker(QThread):
 
 
 class DevicePage(QWidget):
-    """设备管理页：筛选栏 + 表格/右侧栏 + 底部主操作工具栏。"""
+    """设备管理页：筛选栏 + Verify 设备表 / LAN 摘要侧栏 + 底部主操作工具栏。"""
 
     def __init__(self, app: "Application") -> None:
         super().__init__()
@@ -126,6 +126,8 @@ class DevicePage(QWidget):
         self._row_devices: list[DeviceInfo] = []
         self._activate_workers: list[ActivateWorker] = []
         self._build()
+        self._connect_team_events()
+        self._refresh_lan_members()
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
@@ -226,11 +228,23 @@ class DevicePage(QWidget):
         tb.export_diagnostics_requested.connect(lambda: self._phase_hint("导出诊断"))
         tb.open_logs_requested.connect(self._open_log_viewer)
 
+    def _connect_team_events(self) -> None:
+        team_manager = getattr(self._app, "team_manager", None)
+        if team_manager is None:
+            return
+        ws_server = getattr(team_manager, "ws_server", None)
+        if ws_server is None:
+            return
+        ws_server.device_connected.connect(lambda *_: self._refresh_lan_members())
+        ws_server.device_disconnected.connect(lambda *_: self._refresh_lan_members())
+        ws_server.device_message.connect(lambda *_: self._refresh_lan_members())
+
     # ── 数据 ──────────────────────────────────────
 
     def refresh_devices(self, devices: list[DeviceInfo]) -> None:
         self._devices = devices
         self._apply_filters()
+        self._refresh_lan_members()
 
     def _apply_filters(self) -> None:
         search = self._f_search.text().strip().lower()
@@ -302,6 +316,13 @@ class DevicePage(QWidget):
         win = self.window()
         if hasattr(win, "update_stats"):
             win.update_stats(len(self._devices), online)
+
+    def _refresh_lan_members(self) -> None:
+        team_manager = getattr(self._app, "team_manager", None)
+        if team_manager is None:
+            self._side_panel.update_lan_members([], self._devices)
+            return
+        self._side_panel.update_lan_members(team_manager.members, self._devices)
 
     # ── 右键菜单 ──────────────────────────────────
 
