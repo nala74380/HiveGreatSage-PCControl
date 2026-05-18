@@ -3,18 +3,20 @@ r"""
 名称: 设备管理器
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.2.0
+版本: V1.3.0
 功能及相关说明:
-  聚合 Verify API 数据、本地元数据、ADB 本地连接状态，提供统一的设备列表。
+  聚合 Verify API 数据、本地元数据、ADB 本地连接映射，提供统一的设备列表。
 
   本地元数据存储在 config/device_meta.json。
+  ADB 本地连接映射由 AdbLinkManager 管理。
 
 边界说明:
   - 设备绑定主键统一为 device_id。
-  - connection_type / connection_label 只来自 PC 中控侧 ADB 本地查询，不来自 Verify API。
-  - ADB serial 与 device_id 不能天然视为同一概念；当前仅在二者完全相等时自动注入连接信息。
+  - connection_type / connection_label 只来自 PC 中控本地映射，不来自 Verify API。
+  - DeviceManager 不直接猜测 adb_serial 与 device_id 的关系。
 
 改进内容:
+  V1.3.0 - ADB 连接映射职责下沉到 AdbLinkManager。
   V1.2.0 - 注入 PC 中控侧 ADB 本地连接展示信息。
   V1.1.0 - 支持 reload_network_config()，远程 network-config 生效后可更新 DeviceApi。
   V1.0.0 - 初始版本
@@ -28,12 +30,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from core.api_client.device_api import DeviceApi
+from core.device.adb_link_manager import AdbConnectionLink, AdbLinkManager
 from core.device.models import DeviceInfo
 
 if TYPE_CHECKING:
     from core.utils.config import Config
     from core.auth.auth_manager import AuthManager
-    from core.utils.adb_manager import AdbManager, DeviceInfo as AdbDeviceInfo
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +45,17 @@ _META_FILE = _PROJ_ROOT / "config" / "device_meta.json"
 
 class DeviceManager:
     """
-    设备列表管理，负责 API 拉取 + 本地元数据合并 + ADB 状态注入。
+    设备列表管理，负责 API 拉取 + 本地元数据合并 + ADB 本地连接映射注入。
 
     线程安全说明：
         fetch_devices() 由 SyncWorker（工作线程）调用。
         update_meta() 由 UI 线程通过 Signal→Slot 间接触发。
     """
 
-    def __init__(self, config: "Config", auth: "AuthManager", adb: "AdbManager | None" = None) -> None:
+    def __init__(self, config: "Config", auth: "AuthManager", adb_links: AdbLinkManager | None = None) -> None:
         self._config = config
         self._auth = auth
-        self._adb = adb
+        self._adb_links = adb_links or AdbLinkManager()
         self._api = DeviceApi(
             base_url=config.get("server.api_base_url", ""),
             timeout=float(config.get("server.timeout", 15)),
@@ -83,27 +85,28 @@ class DeviceManager:
 
     def fetch_devices(self) -> list[DeviceInfo]:
         """
-        从 Verify API 拉取设备列表，合并本地元数据和 ADB 本地连接信息后返回。
+        从 Verify API 拉取设备列表，合并本地元数据和 ADB 本地连接映射后返回。
         由 SyncWorker 在工作线程中定时调用。
         """
         self._api.set_token(self._auth.access_token)
 
         data = self._api.get_device_list()
         devices_raw: list[dict] = data.get("devices", [])
-        adb_by_device_id = self._get_adb_connection_index()
+        device_ids = [raw.get("device_id", "") or "" for raw in devices_raw]
+        adb_links = self._adb_links.build_connection_index(device_ids)
 
         devices: list[DeviceInfo] = []
         for raw in devices_raw:
             device_id = raw.get("device_id", "") or ""
             meta = self._meta.get(device_id, {})
             dev = DeviceInfo.from_api(raw, meta)
-            adb_dev = adb_by_device_id.get(device_id)
-            if adb_dev is not None:
-                self._apply_adb_info(dev, adb_dev)
+            link = adb_links.get(device_id)
+            if link is not None:
+                self._apply_adb_link(dev, link)
             devices.append(dev)
 
         logger.debug(
-            "设备列表拉取完成: %d 台 (在线 %d, ADB匹配 %d)",
+            "设备列表拉取完成: %d 台 (在线 %d, ADB映射 %d)",
             len(devices),
             sum(1 for d in devices if d.is_online),
             sum(1 for d in devices if d.adb_connected),
@@ -138,41 +141,19 @@ class DeviceManager:
         """返回单台设备的本地元数据字典（不存在时返回空 dict）。"""
         return dict(self._meta.get(device_key, {}))
 
+    def adb_links(self) -> AdbLinkManager:
+        """返回 ADB 本地映射管理器。"""
+        return self._adb_links
+
     # ── ADB 本地连接信息 ─────────────────────────────
 
-    def _get_adb_connection_index(self) -> dict[str, "AdbDeviceInfo"]:
-        """
-        构建 ADB 本地连接信息索引。
-
-        当前仅采用严格规则：
-            device_id == adb serial
-
-        不做模糊匹配，不把 USB SN / TCP 地址猜测为用户设备编号。
-        """
-        if self._adb is None:
-            return {}
-        try:
-            adb_devices = self._adb.list_devices()
-        except Exception as exc:
-            logger.warning("ADB 设备列表查询失败，跳过本地连接信息注入: %s", exc)
-            return {}
-        return {dev.serial: dev for dev in adb_devices if dev.serial}
-
     @staticmethod
-    def _apply_adb_info(device: DeviceInfo, adb_device: "AdbDeviceInfo") -> None:
-        """把 ADB 本地连接展示信息注入 DeviceInfo。"""
-        mode_name = getattr(adb_device.mode, "name", "").lower()
-        if mode_name == "usb":
-            connection_type = "usb"
-        elif mode_name == "tcpip":
-            connection_type = "tcp"
-        else:
-            connection_type = "unknown"
-
-        device.connection_type = connection_type
-        device.connection_label = adb_device.serial
-        device.adb_serial = adb_device.serial
-        device.adb_connected = adb_device.is_ready
+    def _apply_adb_link(device: DeviceInfo, link: AdbConnectionLink) -> None:
+        """把 AdbLinkManager 输出的本地连接展示信息注入 DeviceInfo。"""
+        device.connection_type = link.connection_type
+        device.connection_label = link.connection_label
+        device.adb_serial = link.adb_serial
+        device.adb_connected = True
 
     # ── 内部方法 ─────────────────────────────────
 
