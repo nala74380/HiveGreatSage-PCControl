@@ -3,12 +3,13 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.1.0
+版本: V1.1.1
 状态: P3 UI 边界重构执行中
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
+  V1.1.1 修复：对齐 DeviceInfo 真实字段 device_fingerprint，不再使用不存在的 fingerprint 属性。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -45,18 +46,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # P1 低风险拆分：暂在本页保留设备页专用颜色与辅助函数，后续再统一迁移到 ui.styles。
-C_BG_MAIN = "#0e0e0c"
 C_BG_PANEL = "#111110"
 C_BG_ITEM = "#1a1a18"
-C_BG_HOVER = "#141412"
-C_BG_SEL = "#071f16"
 C_BORDER = "#1e1e1c"
-C_BORDER2 = "#2a2a28"
 C_TEAL = "#5DCAA5"
 C_TEAL_BG2 = "#04342C"
 C_GREEN = "#97C459"
 C_GREEN_BG = "#173404"
-C_AMBER = "#EF9F27"
 C_RED = "#F7C1C1"
 C_RED_BG = "#501313"
 C_TEXT = "#c8c7c0"
@@ -64,9 +60,8 @@ C_TEXT2 = "#B4B2A9"
 C_TEXT_MID = "#888780"
 C_TEXT_DIM = "#5F5E5A"
 C_TEXT_MUTE = "#444441"
-MONO_FONT = "Consolas"
 
-_DEV_COLS = ["", "编号", "序列号", "角色", "状态", "激活", "当前任务", "等级", "战力", "区服", "心跳", "备注"]
+_DEV_COLS = ["", "编号", "连接标识", "角色", "状态", "激活", "当前任务", "等级", "战力", "区服", "心跳", "备注"]
 _STATUS_MAP = {
     "running": (C_TEAL_BG2, C_TEAL, "运行中"),
     "idle": (C_BG_ITEM, C_TEXT_MID, "在线"),
@@ -90,18 +85,19 @@ def _badge(text: str, bg: str, fg: str, font_size: int = 11) -> QLabel:
     return lbl
 
 
-def _sep_v() -> QFrame:
-    f = QFrame()
-    f.setFrameShape(QFrame.Shape.VLine)
-    f.setFixedWidth(1)
-    f.setStyleSheet(f"background:{C_BORDER}; border:none;")
-    return f
-
-
 def _label(text: str, color: str = C_TEXT_MUTE, size: int = 12) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(f"color:{color}; font-size:{size}px;")
     return lbl
+
+
+def _device_key(dev: DeviceInfo) -> str:
+    """DeviceInfo 的真实稳定键。"""
+    return dev.device_fingerprint
+
+
+def _connection_text(dev: DeviceInfo) -> str:
+    return dev.connection_label or dev.device_fingerprint[:20]
 
 
 class ActivateWorker(QThread):
@@ -127,6 +123,7 @@ class DevicePage(QWidget):
         self._app = app
         self._devices: list[DeviceInfo] = []
         self._visible_devices: list[DeviceInfo] = []
+        self._row_devices: list[DeviceInfo] = []
         self._activate_workers: list[ActivateWorker] = []
         self._build()
 
@@ -162,8 +159,8 @@ class DevicePage(QWidget):
         fl.addWidget(_label("筛选：", C_TEXT_MUTE, 11))
 
         self._f_search = QLineEdit()
-        self._f_search.setPlaceholderText("编号 / 序列号 / 区服...")
-        self._f_search.setFixedWidth(220)
+        self._f_search.setPlaceholderText("编号 / 连接标识 / 区服...")
+        self._f_search.setFixedWidth(240)
         self._f_search.setFixedHeight(26)
         self._f_search.textChanged.connect(self._apply_filters)
         fl.addWidget(self._f_search)
@@ -244,8 +241,10 @@ class DevicePage(QWidget):
 
         filtered = [
             d for d in self._devices
-            if (not search or search in d.display_id.lower()
-                or search in d.fingerprint.lower()
+            if (not search
+                or search in d.display_id.lower()
+                or search in _connection_text(d).lower()
+                or search in d.device_fingerprint.lower()
                 or search in d.server.lower())
             and (status_text == "全部状态" or d.api_status == status_map.get(status_text, ""))
             and (role_text == "全部角色" or d.role == role_map.get(role_text, ""))
@@ -257,6 +256,7 @@ class DevicePage(QWidget):
         self._update_selection_summary()
 
     def _populate_table(self, devices: list[DeviceInfo]) -> None:
+        self._row_devices = list(devices)
         self._table.setRowCount(len(devices))
         for row, dev in enumerate(devices):
             self._table.setRowHeight(row, 40)
@@ -271,7 +271,7 @@ class DevicePage(QWidget):
             self._table.setCellWidget(row, 0, chk_w)
 
             self._table.setItem(row, 1, self._item(dev.display_id, C_TEXT))
-            self._table.setItem(row, 2, self._item(dev.fingerprint[:20], C_TEXT_MID))
+            self._table.setItem(row, 2, self._item(_connection_text(dev), C_TEXT_MID))
 
             if dev.role in _ROLE_MAP:
                 bg, fg, text = _ROLE_MAP[dev.role]
@@ -366,7 +366,7 @@ class DevicePage(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
         )
         if ret == QMessageBox.StandardButton.Yes:
-            logger.info("解绑设备: %s（Phase 2 实现）", dev.fingerprint[:12])
+            logger.info("解绑设备: %s（Phase 2 实现）", _device_key(dev)[:12])
 
     def _do_activate(self, dev: DeviceInfo) -> None:
         if not dev.adb_serial:
@@ -388,7 +388,7 @@ class DevicePage(QWidget):
     def _on_activate_done(self, serial: str, ok: bool, msg: str) -> None:
         if ok:
             QMessageBox.information(self, "激活成功", f"{serial}\n{msg}")
-            fp = next((d.fingerprint for d in self._devices if d.adb_serial == serial), "")
+            fp = next((_device_key(d) for d in self._devices if d.adb_serial == serial), "")
             if fp:
                 self._app.device_manager.update_meta(fp, activated=True)
         else:
@@ -397,13 +397,12 @@ class DevicePage(QWidget):
 
     def _request_refresh(self) -> None:
         if hasattr(self._app, "sync_manager") and hasattr(self._app.sync_manager, "worker"):
-            # 当前同步线程负责周期刷新；P1 阶段保留刷新按钮为提示，避免假装已实现立即拉取。
             QMessageBox.information(self, "刷新", "当前由同步线程自动刷新；立即刷新将在后续同步接口中实现。")
         else:
             self._apply_filters()
 
     def _phase_hint(self, action_name: str) -> None:
-        QMessageBox.information(self, "待实现", f"{action_name} 属于后续批量操作实现范围，P1 仅完成布局重构。")
+        QMessageBox.information(self, "待实现", f"{action_name} 属于后续批量操作实现范围，当前仅完成布局与入口重构。")
 
     # ── 选择操作 ──────────────────────────────────
 
@@ -463,11 +462,9 @@ class DevicePage(QWidget):
     # ── 辅助 ──────────────────────────────────────
 
     def _get_device_at_row(self, row: int) -> DeviceInfo | None:
-        item = self._table.item(row, 2)
-        if item is None:
-            return None
-        fp_partial = item.text()
-        return next((d for d in self._visible_devices if d.fingerprint.startswith(fp_partial.replace("...", ""))), None)
+        if 0 <= row < len(self._row_devices):
+            return self._row_devices[row]
+        return None
 
     @staticmethod
     def _item(
