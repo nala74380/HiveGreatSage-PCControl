@@ -3,11 +3,11 @@ r"""
 名称: 设备管理页右侧中控侧栏
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.1.0
-状态: P1/P3 UI 边界重构回归中
+版本: V1.2.0
+状态: P3.4-c LAN IP 自动匹配
 功能及相关说明:
   设备管理页右侧中控侧栏。
-  承载设备统计、LAN 在线成员、分组摘要、列显示说明、自动刷新说明、当前选中摘要。
+  承载设备统计、LAN 在线成员、ADB 映射状态、分组摘要、列显示说明、自动刷新说明、当前选中摘要。
   LAN 在线成员只作为局域网实时连接摘要，不写入设备主表，不替代 Verify 设备列表。
   设备绑定主键统一为 device_id，不使用隐藏设备唯一标识。
   不承载远控/投屏入口。
@@ -38,6 +38,7 @@ from ui.styles.colors import (
 )
 
 if TYPE_CHECKING:
+    from core.device.adb_link_manager import AdbConnectionLink
     from core.team.team_manager import TeamMember
 
 
@@ -92,7 +93,7 @@ class DeviceSidePanel(QWidget):
 
         root.addWidget(self._section_title("LAN 在线成员"))
         self._lan_count_label = self._kv(root, "实时成员", "0")
-        root.addWidget(self._hint("局域网 WebSocket 实时连接摘要；不写入设备主表，不替代 Verify 设备列表。"))
+        root.addWidget(self._hint("局域网 WebSocket 实时连接摘要；可辅助匹配 TCP ADB，但不写入 Verify 绑定主键。"))
         lan_box = QWidget()
         self._lan_list_layout = QVBoxLayout(lan_box)
         self._lan_list_layout.setContentsMargins(0, 0, 0, 0)
@@ -140,9 +141,15 @@ class DeviceSidePanel(QWidget):
         )
         self._apply_stats(stats)
 
-    def update_lan_members(self, members: list["TeamMember"], verify_devices: list[DeviceInfo] | None = None) -> None:
+    def update_lan_members(
+        self,
+        members: list["TeamMember"],
+        verify_devices: list[DeviceInfo] | None = None,
+        adb_links: dict[str, "AdbConnectionLink"] | None = None,
+    ) -> None:
         """更新 LAN 在线成员摘要，不修改设备主表。"""
         verify_device_ids = {d.device_id for d in (verify_devices or []) if d.device_id}
+        adb_links = adb_links or {}
         if self._lan_count_label is not None:
             self._lan_count_label.setText(str(len(members)))
         if self._lan_list_layout is None:
@@ -154,8 +161,9 @@ class DeviceSidePanel(QWidget):
             return
 
         for member in sorted(members, key=lambda item: item.device_id):
-            matched = member.device_id in verify_device_ids
-            self._lan_list_layout.addWidget(self._lan_member_card(member, matched))
+            in_verify = member.device_id in verify_device_ids
+            link = adb_links.get(member.device_id)
+            self._lan_list_layout.addWidget(self._lan_member_card(member, in_verify, link))
 
     def update_selection(self, selected: list[DeviceInfo]) -> None:
         """更新当前选中摘要。"""
@@ -191,7 +199,7 @@ class DeviceSidePanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _lan_member_card(self, member: "TeamMember", matched: bool) -> QWidget:
+    def _lan_member_card(self, member: "TeamMember", in_verify: bool, link: "AdbConnectionLink | None") -> QWidget:
         card = QWidget()
         card.setStyleSheet(f"background:{BG_ITEM}; border-radius:5px; padding:4px;")
         lay = QVBoxLayout(card)
@@ -203,9 +211,9 @@ class DeviceSidePanel(QWidget):
         device_id.setStyleSheet(f"color:{TEXT}; font-size:12px; font-weight:600;")
         top.addWidget(device_id)
         top.addStretch()
-        match = QLabel("已绑定" if matched else "未入主表")
+        match = QLabel("已入主表" if in_verify else "未入主表")
         match.setStyleSheet(
-            f"background:{GREEN_BG if matched else AMBER_BG}; color:{GREEN if matched else AMBER};"
+            f"background:{GREEN_BG if in_verify else AMBER_BG}; color:{GREEN if in_verify else AMBER};"
             "border-radius:7px; padding:1px 6px; font-size:9px;"
         )
         top.addWidget(match)
@@ -213,9 +221,16 @@ class DeviceSidePanel(QWidget):
 
         name = member.device_name or member.info.get("device_name", "") or "未上报设备名"
         lay.addWidget(self._mini_text(f"名称：{name}"))
+        lay.addWidget(self._mini_text(f"LAN IP：{member.peer_ip or '—'}"))
         lay.addWidget(self._mini_text(f"状态：{member.status or 'idle'}"))
         if member.current_task:
             lay.addWidget(self._mini_text(f"任务：{member.current_task}"))
+        if link is None:
+            lay.addWidget(self._mini_text("ADB：未匹配"))
+        elif link.conflict:
+            lay.addWidget(self._mini_text("ADB：冲突，需人工确认"))
+        else:
+            lay.addWidget(self._mini_text(f"ADB：{link.connection_label} / {link.match_method}"))
         return card
 
     @staticmethod
