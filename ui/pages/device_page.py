@@ -3,14 +3,15 @@ r"""
 名称: 设备管理页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-18
-版本: V1.3.0
-状态: P3.4-d ADB identity 文件读取
+版本: V1.4.0
+状态: P3.4-e ADB 人工绑定 UI
 功能及相关说明:
   从历史 main_window.py 中拆出的设备管理页。
   P1 目标：筛选栏在上，设备表格在中，右侧中控侧栏，底部主操作工具栏。
   P3 目标：单设备“编辑 / 设置”入口切换到 DeviceSettingsDialog。
   P3.4-c：LAN 成员变化时刷新 AdbLinkManager 的 LAN IP 映射，并更新连接标识展示。
   P3.4-d：Verify 设备列表刷新后尝试读取安卓端公开 identity 文件，生成 adb_identity 高可信映射。
+  P3.4-e：设备设置弹窗人工绑定 / 解绑 ADB 后，刷新设备表连接标识。
   本文件不包含远控、投屏、scrcpy、公网远控、Relay 远控等能力。
 """
 
@@ -362,6 +363,11 @@ class DevicePage(QWidget):
                 dev.adb_serial = link.adb_serial
                 dev.adb_connected = not link.conflict
 
+    def _on_adb_link_changed(self, _: str = "") -> None:
+        self._refresh_device_adb_fields()
+        self._apply_filters()
+        self._refresh_lan_members(update_links=False)
+
     # ── 右键菜单 ──────────────────────────────────
 
     def _show_context_menu(self, pos) -> None:
@@ -411,6 +417,7 @@ class DevicePage(QWidget):
         from ui.dialogs.device_settings_dialog import DeviceSettingsDialog
         dlg = DeviceSettingsDialog(self._app, dev, self)
         dlg.meta_saved.connect(lambda _: self._apply_filters())
+        dlg.adb_link_changed.connect(self._on_adb_link_changed)
         dlg.exec()
 
     def _open_log_viewer(self) -> None:
