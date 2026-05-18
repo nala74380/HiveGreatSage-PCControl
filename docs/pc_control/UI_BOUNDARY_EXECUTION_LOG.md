@@ -249,20 +249,99 @@ GlobalSettingsDialog 没有发现需要立即回滚的问题。
 
 ---
 
-## 5. 下一阶段
+## 5. P3：设备设置对话框
 
-进入：
+### 5.1 已执行
+
+已新增：
 
 ```text
-P3：设备设置对话框
+ui/dialogs/device_settings_dialog.py
 ```
 
-P3 第一轮目标：
+已修改：
+
+```text
+ui/pages/device_page.py
+```
+
+### 5.2 已完成内容
 
 ```text
 新增 DeviceSettingsDialog 骨架。
-新增主要设置、账号设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、其他游戏参数等页签骨架。
-单设备“编辑/设置”入口切到 DeviceSettingsDialog。
-旧 DeviceEditDialog 作为本地元数据兼容入口保留，不直接删除。
-本地 profile 只作为草稿，不写成最终真相源。
+新增主要设置、账号设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、本地元数据、其他游戏参数等页签骨架。
+单设备“编辑 / 设置”入口已切换到 DeviceSettingsDialog。
+设备表双击入口已沿用同一 DeviceSettingsDialog。
+旧 DeviceEditDialog 未删除，但不再作为设备页主入口。
+本地元数据兼容页保留 alias / role / note 保存能力。
+本地 profile 草稿保存到用户目录下 .hive_greatsage/pccontrol/profiles/device。
+本地草稿明确标记 synced=false，不作为最终真相源。
+账号来源只保留手动输入和客户外部账号数据库。
+未加入无证据账号来源。
+未声称后端配置保存闭环已完成。
+```
+
+### 5.3 当前 DeviceSettingsDialog 页签
+
+```text
+主要设置
+账号设置
+任务设置
+物品处理
+购买设置
+交易设置
+制造设置
+铸币设置
+本地元数据
+其他
+```
+
+### 5.4 相关提交
+
+```text
+301c37229e3196b28890965c5c052d2367e377bb  feat(ui): add device settings dialog skeleton
+c8f89b8db8ac2d1a37234ba0adca8b60474f54f3  refactor(ui): route device edit action to device settings dialog
+```
+
+### 5.5 待确认
+
+```text
+P3 尚未执行 compileall / pytest。
+P3 尚未执行手工点击验证。
+本地草稿保存路径在 Windows 环境下需确认是否符合预期。
+账号设置页密码显示 / 隐藏 / 复制 / 编辑尚未进入 P4。
+设备设置保存到后端配置接口尚未联调。
+旧 DeviceEditDialog 尚未删除，仅保留为兼容文件。
+```
+
+---
+
+## 6. 下一阶段
+
+推荐先执行：
+
+```text
+P3.1：设备设置对话框验证
+```
+
+验证内容：
+
+```text
+python -m compileall -q .
+pytest -q
+启动 PCControl。
+进入设备管理页。
+双击设备，确认打开 DeviceSettingsDialog。
+右键设备 -> 编辑 / 设置，确认打开 DeviceSettingsDialog。
+确认页签包含主要设置、账号设置、任务设置、物品处理、购买设置、交易设置、制造设置、铸币设置、本地元数据、其他。
+确认账号设置页只出现手动输入、客户外部账号数据库两类来源。
+确认本地元数据页可以保存显示编号、角色、备注。
+确认保存草稿不会提示云端保存成功。
+确认没有远控 / 投屏 / scrcpy 入口。
+```
+
+通过 P3.1 后再进入：
+
+```text
+P4：账号设置页与密码行为
 ```
