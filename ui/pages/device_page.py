@@ -48,20 +48,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # P1 低风险拆分：暂在本页保留设备页专用颜色与辅助函数，后续再统一迁移到 ui.styles。
-C_BG_PANEL = "#111110"
-C_BG_ITEM = "#1a1a18"
-C_BORDER = "#1e1e1c"
-C_TEAL = "#5DCAA5"
-C_TEAL_BG2 = "#04342C"
-C_GREEN = "#97C459"
-C_GREEN_BG = "#173404"
-C_RED = "#F7C1C1"
-C_RED_BG = "#501313"
-C_TEXT = "#c8c7c0"
-C_TEXT2 = "#B4B2A9"
-C_TEXT_MID = "#888780"
-C_TEXT_DIM = "#5F5E5A"
-C_TEXT_MUTE = "#444441"
+C_BG_PANEL = "#FFFFFF"
+C_BG_ITEM = "#EEF6FF"
+C_BORDER = "#D8E6F7"
+C_TEAL = "#12B886"
+C_TEAL_BG2 = "#E6FCF5"
+C_GREEN = "#2F9E44"
+C_GREEN_BG = "#EAF8EF"
+C_RED = "#E03131"
+C_RED_BG = "#FFE3E3"
+C_TEXT = "#14213D"
+C_TEXT2 = "#243B53"
+C_TEXT_MID = "#53657D"
+C_TEXT_DIM = "#7B8BA0"
+C_TEXT_MUTE = "#9AABBF"
 
 _DEV_COLS = ["", "编号", "连接标识", "角色", "状态", "激活", "当前任务", "等级", "战力", "区服", "心跳", "备注"]
 _STATUS_MAP = {
@@ -127,6 +127,7 @@ class DevicePage(QWidget):
         self._visible_devices: list[DeviceInfo] = []
         self._row_devices: list[DeviceInfo] = []
         self._activate_workers: list[ActivateWorker] = []
+        self._team_events_connected = False
         self._build()
         self._connect_team_events()
         self._refresh_lan_members(update_links=False)
@@ -197,6 +198,29 @@ class DevicePage(QWidget):
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setHighlightSections(False)
         table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet(f"""
+            QTableWidget {{
+                background: #ffffff;
+                alternate-background-color: #f6fbff;
+                border: none;
+                color: {C_TEXT};
+                selection-background-color: #dff7ee;
+                selection-color: {C_TEXT};
+            }}
+            QTableWidget::item {{
+                padding: 7px 9px;
+                border-bottom: 1px solid #edf3fb;
+            }}
+            QTableWidget::item:hover {{ background: #eef7ff; }}
+            QHeaderView::section {{
+                background: #2f80ed;
+                color: #ffffff;
+                border: none;
+                padding: 8px 10px;
+                font-weight: 700;
+            }}
+        """)
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._show_context_menu)
         table.cellDoubleClicked.connect(self._on_double_click)
@@ -231,6 +255,8 @@ class DevicePage(QWidget):
         tb.open_logs_requested.connect(self._open_log_viewer)
 
     def _connect_team_events(self) -> None:
+        if self._team_events_connected:
+            return
         team_manager = getattr(self._app, "team_manager", None)
         if team_manager is None:
             return
@@ -240,6 +266,11 @@ class DevicePage(QWidget):
         ws_server.device_connected.connect(lambda *_: self._refresh_lan_members(update_links=True))
         ws_server.device_disconnected.connect(lambda *_: self._refresh_lan_members(update_links=True))
         ws_server.device_message.connect(lambda *_: self._refresh_lan_members(update_links=True))
+        self._team_events_connected = True
+
+    def attach_runtime_services(self) -> None:
+        self._connect_team_events()
+        self._refresh_lan_members(update_links=False)
 
     # ── 数据 ──────────────────────────────────────
 

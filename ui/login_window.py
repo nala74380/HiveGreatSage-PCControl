@@ -45,6 +45,8 @@ from PySide6.QtWidgets import (
 
 from core.auth.auth_manager import AuthManager
 from core.auth.models import LoginResult
+from core.utils.constants import APP_VERSION
+from game.game_config import GAME_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +261,8 @@ class LoginWindow(QDialog):
         super().__init__(parent)
         self._auth   = auth
         self._worker: LoginWorker | None = None
+        self._game_name = GAME_NAME
+        self._app_version = APP_VERSION
 
         self.setStyleSheet(_STYLE)
         self._setup_window()
@@ -267,8 +271,7 @@ class LoginWindow(QDialog):
 
     # ── 窗口基础配置 ──────────────────────
     def _setup_window(self) -> None:
-        from game.game_config import GAME_NAME
-        self.setWindowTitle(f"蜂巢·大圣 — {GAME_NAME} 登录")
+        self.setWindowTitle(f"蜂巢·大圣 — {self._game_name} 登录")
         self.setFixedSize(420, 540)
         # 完全无边框，去掉系统标题栏
         self.setWindowFlags(
@@ -288,11 +291,11 @@ class LoginWindow(QDialog):
         close_row.setContentsMargins(0, 0, 0, 0)
         close_row.addStretch()
         close_btn = QPushButton("×")
-        close_btn.setFixedSize(28, 28)
+        close_btn.setFixedSize(42, 42)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(
             "QPushButton { border: none; background: transparent;"
-            f" color: {_TEXT_HINT}; font-size: 18px; font-weight: 300; }}"
+            f" color: {_TEXT_HINT}; font-size: 27px; font-weight: 300; }}"
             f"QPushButton:hover {{ color: {_TEXT_PRIMARY}; }}"
         )
         close_btn.clicked.connect(self.reject)
@@ -352,7 +355,7 @@ class LoginWindow(QDialog):
         root.addStretch()
 
         # ── 版本号 ──
-        ver = QLabel("v1.0.0 · 夜鸦专用版")
+        ver = QLabel(f"v{self._app_version} · {self._game_name}专用版")
         ver.setObjectName("version-label")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(ver)
@@ -371,7 +374,7 @@ class LoginWindow(QDialog):
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        subtitle = QLabel("PC 中控  ·  夜鸦")
+        subtitle = QLabel(f"PC 中控  ·  {self._game_name}")
         subtitle.setObjectName("subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 

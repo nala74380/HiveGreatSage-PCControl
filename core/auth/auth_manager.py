@@ -189,6 +189,7 @@ class AuthManager:
         api = self._get_api()
         try:
             me_data = api.me()
+            inactive_devices = me_data.get("inactive_devices")
             self._user_info = UserInfo(
                 username=self._user_info.username,
                 display_name=self._user_info.display_name,
@@ -197,7 +198,7 @@ class AuthManager:
                 device_quota=int(me_data.get("authorized_devices") or 0),
                 expired_at=me_data.get("valid_until") or "",
                 activated_devices=int(me_data.get("activated_devices") or 0),
-                inactive_devices=me_data.get("inactive_devices"),
+                inactive_devices=None if inactive_devices is None else int(inactive_devices or 0),
             )
             self._auth_info = me_data
         except Exception as e:

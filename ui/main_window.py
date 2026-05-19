@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from core.utils.constants import APP_VERSION
 from ui.pages.device_page import DevicePage
 from ui.styles.colors import (
     BG_DEEP,
@@ -56,52 +57,93 @@ logger = logging.getLogger(__name__)
 MAIN_QSS = f"""
 QMainWindow, QWidget {{
     background: {BG_MAIN};
-    font-family: '{MONO_FONT}', 'Consolas', monospace;
+    font-family: 'Microsoft YaHei UI', 'HarmonyOS Sans SC', 'Segoe UI', sans-serif;
     font-size: 13px;
     color: {TEXT};
 }}
-#topbar  {{ background: {BG_PANEL}; border-bottom: 1px solid {BORDER}; }}
-#tabbar  {{ background: {BG_PANEL}; border-bottom: 2px solid {BORDER}; }}
-#statusbar {{ background: {BG_DEEP}; border-top: 1px solid {BG_PANEL}; }}
-#filterbar {{ background: {BG_PANEL}; border-bottom: 1px solid {BORDER}; }}
+#topbar  {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #ffffff, stop:0.42 #eef7ff, stop:0.72 #fff7df, stop:1 #eefcf5);
+    border-bottom: none;
+}}
+#tabbar  {{ background: #ffffff; border-bottom: 1px solid {BORDER}; }}
+#statusbar {{ background: #f8fbff; border-top: 1px solid {BORDER}; }}
+#filterbar {{ background: #ffffff; border-bottom: 1px solid {BORDER}; }}
 QPushButton#tab-btn {{
     background: transparent;
     border: none;
-    border-bottom: 2px solid transparent;
+    border-bottom: 3px solid transparent;
     border-radius: 0;
     color: {TEXT_MID};
-    padding: 0 18px;
-    font-size: 13px;
-    font-family: '{MONO_FONT}', monospace;
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 600;
 }}
-QPushButton#tab-btn:hover {{ color: {TEXT}; background: {BG_ITEM}; }}
+QPushButton#tab-btn:hover {{ color: {TEAL_DK}; background: #eef7ff; }}
 QPushButton#tab-btn[active="true"] {{
-    color: {TEAL};
-    border-bottom: 2px solid {TEAL_DK};
-    background: transparent;
+    color: {TEAL_DK};
+    border-bottom: 3px solid {TEAL};
+    background: #e9f8ff;
 }}
-QPushButton {{
+QPushButton#window-control {{
     background: transparent;
-    border: 0.5px solid {BORDER2};
-    border-radius: 5px;
+    border: none;
+    border-radius: 9px;
     color: {TEXT_MID};
-    padding: 4px 11px;
-    font-family: '{MONO_FONT}', monospace;
-    font-size: 12px;
+    padding: 0;
+    font-size: 17px;
+    font-weight: 700;
 }}
-QPushButton:hover {{ background: {BG_ITEM}; color: {TEXT}; }}
-QPushButton:disabled {{ color: {TEXT_MUTE}; }}
+QPushButton#window-control:hover {{ background: #e7f1ff; color: {TEXT}; }}
+QPushButton#window-control[danger="true"]:hover {{ background: #ffe8eb; color: #d92d20; }}
+QPushButton {{
+    background: #ffffff;
+    border: 1px solid {BORDER2};
+    border-radius: 9px;
+    color: {TEXT};
+    padding: 5px 13px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton:hover {{ background: #eef7ff; border-color: {TEAL}; color: {TEAL_DK}; }}
+QPushButton:disabled {{ color: {TEXT_MUTE}; background: #f3f6fb; }}
+QLineEdit, QComboBox {{
+    background: #ffffff;
+    border: 1px solid {BORDER2};
+    border-radius: 8px;
+    color: {TEXT};
+    padding: 4px 8px;
+}}
+QLineEdit:focus, QComboBox:focus {{ border-color: {TEAL}; background: #fbfeff; }}
+QTableWidget {{
+    background: #ffffff;
+    alternate-background-color: #f6fbff;
+    border: none;
+    gridline-color: {BORDER};
+    color: {TEXT};
+    selection-background-color: #dff7ee;
+    selection-color: {TEXT};
+}}
+QTableWidget::item {{ padding: 7px 9px; border-bottom: 1px solid #edf3fb; }}
+QTableWidget::item:hover {{ background: #eef7ff; }}
+QHeaderView::section {{
+    background: #2f80ed;
+    color: #ffffff;
+    border: none;
+    padding: 8px 10px;
+    font-weight: 700;
+}}
 QMenu {{
-    background: {BG_ITEM};
-    border: 0.5px solid {BORDER2};
-    border-radius: 7px;
-    padding: 4px 0;
+    background: #ffffff;
+    border: 1px solid {BORDER2};
+    border-radius: 10px;
+    padding: 5px 0;
     font-size: 13px;
     color: {TEXT};
 }}
 QMenu::item {{ padding: 8px 16px 8px 28px; }}
-QMenu::item:selected {{ background: {TEAL_BG}; color: {TEAL}; }}
-QMenu::separator {{ height: 1px; background: {BORDER2}; margin: 3px 0; }}
+QMenu::item:selected {{ background: #e9f8ff; color: {TEAL_DK}; }}
+QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 0; }}
 """
 
 
@@ -134,6 +176,7 @@ class TopBar(QWidget):
     def __init__(self, app: "Application") -> None:
         super().__init__()
         self._app = app
+        self._drag_offset = None
         self.setObjectName("topbar")
         self.setFixedHeight(48)
         self._build()
@@ -146,7 +189,7 @@ class TopBar(QWidget):
         logo = QLabel()
         logo.setText(
             f'<span style="color:{TEXT}; font-size:15px;">蜂巢<span style="color:{TEAL}">·</span>大圣</span>'
-            f'<span style="color:{TEXT_DARK}; font-size:10px;"> v1.0.0</span>'
+            f'<span style="color:{TEXT_DARK}; font-size:10px;"> v{APP_VERSION}</span>'
         )
         logo.setStyleSheet("margin-right:20px;")
         lay.addWidget(logo)
@@ -161,13 +204,14 @@ class TopBar(QWidget):
         acct_lay.addWidget(_label(user.display_name or user.username, TEXT, 14))
         level_colors = {
             "vip": (AMBER_BG, AMBER),
-            "svip": ("#26215C", "#AFA9EC"),
+            "svip": ("#EDEBFF", "#6C5CE7"),
             "tester": (TEAL_BG2, TEAL),
             "normal": (BG_ITEM, TEXT_MID),
             "trial": (BG_ITEM, TEXT_DIM),
         }
         bg, fg = level_colors.get(user.user_level, (BG_ITEM, TEXT_MID))
-        acct_lay.addWidget(_badge(user.user_level.upper(), bg, fg, 10))
+        self._level_badge = _badge((user.user_level or "normal").upper(), bg, fg, 10)
+        acct_lay.addWidget(self._level_badge)
         lay.addWidget(acct)
         lay.addWidget(_sep_v())
 
@@ -198,7 +242,8 @@ class TopBar(QWidget):
         exp_lay.setSpacing(5)
         exp_lay.addWidget(_label("到期：", TEXT_DIM, 11))
         expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
-        exp_lay.addWidget(_label(expiry, AMBER, 12))
+        self._lbl_expiry_auth = _label(expiry, AMBER, 12)
+        exp_lay.addWidget(self._lbl_expiry_auth)
         lay.addWidget(exp)
         lay.addWidget(_sep_v())
 
@@ -226,12 +271,42 @@ class TopBar(QWidget):
         logout_btn = QPushButton("退出登录")
         logout_btn.clicked.connect(self._on_logout)
         lay.addWidget(logout_btn)
+        lay.addSpacing(10)
+
+        for text, tooltip, handler, danger in [
+            ("—", "最小化", self._minimize_window, False),
+            ("□", "最大化/还原", self._toggle_maximize, False),
+            ("×", "关闭", self._close_window, True),
+        ]:
+            btn = QPushButton(text)
+            btn.setObjectName("window-control")
+            btn.setProperty("danger", "true" if danger else "false")
+            btn.setToolTip(tooltip)
+            btn.setFixedSize(34, 30)
+            btn.clicked.connect(handler)
+            lay.addWidget(btn)
 
     def update_auth_stats(self) -> None:
         user = self._app.auth.user_info
         self._lbl_ava_auth.setText(str(user.device_quota) if user.device_quota > 0 else "无限")
         self._lbl_act_auth.setText(str(user.activated_devices))
         self._lbl_inact_auth.setText(str(user.inactive_devices) if user.inactive_devices is not None else "—")
+        expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
+        self._lbl_expiry_auth.setText(expiry)
+
+        level_colors = {
+            "vip": (AMBER_BG, AMBER),
+            "svip": ("#EDEBFF", "#6C5CE7"),
+            "tester": (TEAL_BG2, TEAL),
+            "normal": (BG_ITEM, TEXT_MID),
+            "trial": (BG_ITEM, TEXT_DIM),
+        }
+        bg, fg = level_colors.get(user.user_level, (BG_ITEM, TEXT_MID))
+        self._level_badge.setText((user.user_level or "normal").upper())
+        self._level_badge.setStyleSheet(
+            f"background:{bg}; color:{fg}; border-radius:8px;"
+            " padding:2px 8px; font-size:10px;"
+        )
 
     def update_stats(self, total: int, online: int) -> None:
         self._sync_lbl.setText("已同步")
@@ -245,6 +320,44 @@ class TopBar(QWidget):
     def _on_logout(self) -> None:
         self._app.auth.logout()
         QApplication.quit()
+
+    def _minimize_window(self) -> None:
+        self.window().showMinimized()
+
+    def _toggle_maximize(self) -> None:
+        win = self.window()
+        if win.isMaximized():
+            win.showNormal()
+        else:
+            win.showMaximized()
+
+    def _close_window(self) -> None:
+        self.window().close()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.window().move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_maximize()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 _TAB_DEFS = [
@@ -308,6 +421,11 @@ class MainWindow(QMainWindow):
     def __init__(self, app: "Application") -> None:
         super().__init__()
         self._app = app
+        self._sync_connected = False
+        self._last_devices = []
+        self._team_page = None
+        self._order_page = None
+        self._price_page = None
         self.setStyleSheet(MAIN_QSS)
         self._setup_window()
         self._build_ui()
@@ -317,6 +435,7 @@ class MainWindow(QMainWindow):
     def _setup_window(self) -> None:
         from game.game_config import WINDOW_TITLE
         self.setWindowTitle(WINDOW_TITLE)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.resize(1800, 1200)
         self.setMinimumSize(1280, 800)
 
@@ -339,17 +458,9 @@ class MainWindow(QMainWindow):
         self._dev_page = DevicePage(self._app)
         self._stack.addWidget(self._dev_page)
 
-        from ui.widgets.team_widget import TeamWidget
-        self._team_page = TeamWidget(self._app)
-        self._stack.addWidget(self._team_page)
-
-        from ui.widgets.order_widget import OrderWidget
-        self._order_page = OrderWidget()
-        self._stack.addWidget(self._order_page)
-
-        from ui.widgets.price_monitor_widget import PriceMonitorWidget
-        self._price_page = PriceMonitorWidget()
-        self._stack.addWidget(self._price_page)
+        self._stack.addWidget(self._make_placeholder("组队管理", "运行服务启动后加载组队面板"))
+        self._stack.addWidget(self._make_placeholder("同服订单", "收到设备上报后加载订单面板"))
+        self._stack.addWidget(self._make_placeholder("跨服价格", "收到设备上报后加载价格面板"))
 
         self._page_index = {"dev": 0, "team": 1, "order": 2, "price": 3}
 
@@ -357,17 +468,76 @@ class MainWindow(QMainWindow):
         self._statusbar = StatusBarWidget(self._app)
         root_layout.addWidget(self._statusbar)
 
+    def _make_placeholder(self, title: str, desc: str) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.setSpacing(10)
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"color:{TEXT}; font-size:22px; font-weight:700;")
+        desc_lbl = QLabel(desc)
+        desc_lbl.setStyleSheet(f"color:{TEXT_MID}; font-size:13px;")
+        lay.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(desc_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        return page
+
+    def _replace_stack_widget(self, index: int, widget: QWidget) -> None:
+        old = self._stack.widget(index)
+        self._stack.removeWidget(old)
+        old.deleteLater()
+        self._stack.insertWidget(index, widget)
+
     def _connect_sync(self) -> None:
-        worker = self._app.sync_manager.worker
-        worker.devices_updated.connect(self._dev_page.refresh_devices)
-        worker.devices_updated.connect(self._order_page.refresh_from_devices)
-        worker.devices_updated.connect(self._price_page.refresh_from_devices)
+        if self._sync_connected:
+            return
+        sync_manager = getattr(self._app, "sync_manager", None)
+        if sync_manager is None:
+            return
+        worker = sync_manager.worker
+        worker.devices_updated.connect(self._on_devices_updated)
         worker.sync_error.connect(self._on_sync_error)
+        self._sync_connected = True
+
+    def attach_runtime_services(self) -> None:
+        if hasattr(self._dev_page, "attach_runtime_services"):
+            self._dev_page.attach_runtime_services()
+        if hasattr(self._statusbar, "attach_runtime_services"):
+            self._statusbar.attach_runtime_services()
+        self._connect_sync()
+
+    def _on_devices_updated(self, devices: list) -> None:
+        self._last_devices = list(devices)
+        self._dev_page.refresh_devices(devices)
+        if self._order_page is not None:
+            self._order_page.refresh_from_devices(devices)
+        if self._price_page is not None:
+            self._price_page.refresh_from_devices(devices)
+
+    def _ensure_page(self, page_id: str) -> None:
+        if page_id == "team" and self._team_page is None:
+            if getattr(self._app, "team_manager", None) is None:
+                return
+            from ui.widgets.team_widget import TeamWidget
+            self._team_page = TeamWidget(self._app)
+            self._replace_stack_widget(1, self._team_page)
+        elif page_id == "order" and self._order_page is None:
+            from ui.widgets.order_widget import OrderWidget
+            self._order_page = OrderWidget()
+            self._replace_stack_widget(2, self._order_page)
+            if self._last_devices:
+                self._order_page.refresh_from_devices(self._last_devices)
+        elif page_id == "price" and self._price_page is None:
+            from ui.widgets.price_monitor_widget import PriceMonitorWidget
+            self._price_page = PriceMonitorWidget()
+            self._replace_stack_widget(3, self._price_page)
+            if self._last_devices:
+                self._price_page.refresh_from_devices(self._last_devices)
 
     def _on_navigate(self, page_id: str) -> None:
         if page_id == "settings":
             self.open_settings()
         else:
+            self._ensure_page(page_id)
             self._stack.setCurrentIndex(self._page_index.get(page_id, 0))
 
     def open_settings(self) -> None:
@@ -389,5 +559,8 @@ class MainWindow(QMainWindow):
         self._topbar.update_stats(total, online)
 
     def closeEvent(self, event) -> None:
-        self._app.sync_manager.stop()
+        if hasattr(self._app, "_stop_runtime_services"):
+            self._app._stop_runtime_services()
+        if getattr(self._app, "_main_window", None) is self:
+            self._app._main_window = None
         super().closeEvent(event)

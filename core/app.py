@@ -58,10 +58,11 @@ class Application:
         )
         self._qt_app = QApplication(argv)
 
-        from game.game_config import WINDOW_TITLE, GAME_VERSION
+        from core.utils.constants import APP_VERSION
+        from game.game_config import WINDOW_TITLE
 
         self._qt_app.setApplicationName(WINDOW_TITLE)
-        self._qt_app.setApplicationVersion(GAME_VERSION)
+        self._qt_app.setApplicationVersion(APP_VERSION)
 
         # ── 配置 ──────────────────────────────────────────────
         self.config = Config.instance()
@@ -94,32 +95,19 @@ class Application:
             self.config.get("server.project_uuid", "")[:8] + "...",
         )
 
-        # ── ADB ───────────────────────────────────────────────
-        self.adb = AdbManager()
-        if not self.adb.start_server():
-            logger.warning(
-                "ADB server 启动失败，设备管理功能不可用。"
-                "请下载真实的 platform-tools 并解压到 tools/adb/"
-            )
-
-        # ── 认证管理器 ────────────────────────────────────────
+        # -- Auth and lazy runtime placeholders ---------------------------
+        # Runtime managers are initialized after login and the update gate.
         self.auth = AuthManager(self.config)
-
-        # ── ADB 映射管理器 ───────────────────────────────────
-        self.adb_links = AdbLinkManager(self.adb)
-
-        # ── 设备管理器 ─────────────────────────────────────────
-        self.device_manager = DeviceManager(self.config, self.auth, self.adb_links)
-
-        # ── 同步管理器 ─────────────────────────────────────────
-        self.sync_manager = SyncManager(self.device_manager, self.auth, self.config)
-
-        # ── 组队管理器（WS 服务端，Phase 3）────────────────────
-        self.team_manager = TeamManager(self.config)
+        self.adb = None
+        self.adb_links = None
+        self.device_manager = None
+        self.sync_manager = None
+        self.team_manager = None
 
         # ── 主窗口（延迟创建）────────────────────────────────
         self._main_window = None
         self._pending_mock_fallback_message: str | None = None
+        self._runtime_started = False
 
     # ─────────────────────────────────────────────────────
     def run(self) -> int:
@@ -128,32 +116,81 @@ class Application:
             logger.info("用户取消登录，退出")
             return 0
 
-        # 2. 热更新检查（异步，不阻塞主窗口显示）
+        # 2. 热更新检查作为登录后的启动门禁；通过后才进入主界面和运行服务。
         if self.config.get("update.check_on_startup", True):
             self._start_update_check()
-
-        # 3. 启动设备同步（连接 token_expired / mock_fallback_used 信号）
-        self.sync_manager.worker.token_expired.connect(self._on_token_expired)
-        self.sync_manager.worker.mock_fallback_used.connect(self._on_mock_fallback_used)
-        self.sync_manager.start()
-
-        # 4. 启动 WS 服务端（Phase 3）
-        self.team_manager.start()
-
-        # 5. 显示主窗口（立即显示，不等待网络请求）
-        self._show_main_window()
-
-        # 6. 后台拉取完整授权信息（/api/auth/me）— 更新顶部统计
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, self._fetch_user_info_async)
-        QTimer.singleShot(200, self._show_pending_mock_fallback_notice)
+        else:
+            self._enter_main_runtime()
 
         result = self._qt_app.exec()
 
         # 退出时停止后台服务
-        self.sync_manager.stop()
-        self.team_manager.stop()
+        self._stop_runtime_services()
         return result
+
+    def _enter_main_runtime(self, *args) -> None:
+        """Enter the main UI and start services after the update gate passes."""
+        if self._main_window is None:
+            self._show_main_window()
+
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, self._fetch_user_info_async)
+            QTimer.singleShot(160, self._show_pending_mock_fallback_notice)
+            QTimer.singleShot(200, self._bootstrap_runtime_after_main)
+            return
+
+        self._bootstrap_runtime_after_main()
+
+    def _bootstrap_runtime_after_main(self) -> None:
+        """Initialize runtime managers after the main shell is already visible."""
+        if self._runtime_started:
+            return
+        if self._main_window is None:
+            return
+        self._ensure_runtime_managers()
+        if self._main_window is not None and hasattr(self._main_window, "attach_runtime_services"):
+            self._main_window.attach_runtime_services()
+        self._start_runtime_services()
+
+    def _ensure_runtime_managers(self) -> None:
+        """Initialize ADB/device/sync/team managers after login and update gate."""
+        if self.device_manager is not None:
+            return
+
+        self.adb = AdbManager()
+        if not self.adb.start_server():
+            logger.warning(
+                "ADB server 启动失败，设备管理功能不可用。"
+                "请下载真实的 platform-tools 并解压到 tools/adb/"
+            )
+
+        self.adb_links = AdbLinkManager(self.adb)
+        self.device_manager = DeviceManager(self.config, self.auth, self.adb_links)
+        self.sync_manager = SyncManager(self.device_manager, self.auth, self.config)
+        self.team_manager = TeamManager(self.config)
+
+    def _start_runtime_services(self, *args) -> None:
+        """Start post-login runtime services once the update gate has passed."""
+        if self._runtime_started:
+            return
+
+        self._ensure_runtime_managers()
+        if self.sync_manager is None or self.team_manager is None:
+            logger.error("运行期管理器初始化失败，无法启动同步服务")
+            return
+
+        self.sync_manager.worker.token_expired.connect(self._on_token_expired)
+        self.sync_manager.worker.mock_fallback_used.connect(self._on_mock_fallback_used)
+        self.sync_manager.start()
+        self.team_manager.start()
+        self._runtime_started = True
+
+    def _stop_runtime_services(self) -> None:
+        if self.sync_manager is not None:
+            self.sync_manager.stop()
+        if self.team_manager is not None:
+            self.team_manager.stop()
+        self._runtime_started = False
 
     # ─────────────────────────────────────────────────────
     def _do_login(self) -> bool:
@@ -185,7 +222,8 @@ class Application:
 
             if result.changed:
                 self.auth.reload_network_config()
-                self.device_manager.reload_network_config()
+                if self.device_manager is not None:
+                    self.device_manager.reload_network_config()
                 logger.info("登录后网络配置已刷新并应用: %s", result.base_url)
             else:
                 logger.debug("登录后网络配置检查完成: %s", result.message)
@@ -199,37 +237,53 @@ class Application:
 
         self._update_worker = UpdateCheckWorker(self)
         self._update_worker.update_available.connect(self._on_update_available)
+        self._update_worker.no_update.connect(self._enter_main_runtime)
+        self._update_worker.check_failed.connect(self._enter_main_runtime)
         self._update_worker.start()
 
     def _on_update_available(self, info) -> None:
         """热更新结果回调（在主线程执行）。"""
-        if self._main_window is None:
-            return
-
         from ui.widgets.update_dialog import UpdateDialog
         from core.updater.update_downloader import UpdateDownloadWorker
         from core.updater.update_installer import install_and_restart
         from PySide6.QtWidgets import QProgressDialog
         from PySide6.QtCore import Qt
 
+        parent = self._main_window
         dlg = UpdateDialog(
             new_version=info.new_version,
             current_version=info.current_version,
             release_notes=info.release_notes,
             force_update=info.force_update,
-            parent=self._main_window,
+            parent=parent,
         )
         if dlg.exec() != QDialog.Accepted:
+            if info.force_update:
+                logger.warning("强制热更新被取消，退出当前客户端")
+                self._qt_app.quit()
+                return
+            self._enter_main_runtime()
             return
 
-        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self._main_window)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, parent)
+        progress.setWindowModality(
+            Qt.WindowModality.WindowModal if parent else Qt.WindowModality.ApplicationModal
+        )
         progress.show()
 
+        def on_download_failed(msg: str) -> None:
+            progress.close()
+            logger.error("下载失败: %s", msg)
+            if info.force_update:
+                self._qt_app.quit()
+            else:
+                self._enter_main_runtime()
+
         downloader = UpdateDownloadWorker(self, info)
+        progress.canceled.connect(downloader.requestInterruption)
         downloader.progress.connect(progress.setValue)
         downloader.finished.connect(lambda path: (progress.close(), install_and_restart(path)))
-        downloader.failed.connect(lambda msg: (progress.close(), logger.error("下载失败: %s", msg)))
+        downloader.failed.connect(on_download_failed)
         downloader.start()
         self._download_worker = downloader
 
@@ -263,7 +317,8 @@ class Application:
         """
         logger.warning("收到 token_expired 信号，停止同步并弹出重新登录")
 
-        self.sync_manager.stop()
+        if self.sync_manager is not None:
+            self.sync_manager.stop()
 
         from PySide6.QtWidgets import QMessageBox
 
@@ -274,7 +329,8 @@ class Application:
         )
 
         if self._do_login():
-            self.sync_manager.start()
+            if self.sync_manager is not None:
+                self.sync_manager.start()
         else:
             self._qt_app.quit()
 

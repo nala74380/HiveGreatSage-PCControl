@@ -15,42 +15,36 @@ r"""
   已知问题: 无
 """
 
-# ── 背景层 ──────────────────────────────────────────────────
-BG_DEEP   = "#080806"   # 最深背景（状态栏）
-BG_MAIN   = "#0e0e0c"   # 主内容区
-BG_PANEL  = "#111110"   # 面板/工具栏/顶栏/侧栏
-BG_ITEM   = "#1a1a18"   # 列表项/悬停背景
-BG_HOVER  = "#141412"   # 行悬停
-BG_SEL    = "#071f16"   # 选中行
+# Bright command-center theme.
+BG_DEEP   = "#EAF4FF"
+BG_MAIN   = "#F7FBFF"
+BG_PANEL  = "#FFFFFF"
+BG_ITEM   = "#EEF6FF"
+BG_HOVER  = "#E2F0FF"
+BG_SEL    = "#DFF7EE"
 
-# ── 边框 ─────────────────────────────────────────────────────
-BORDER    = "#1e1e1c"   # 普通边框
-BORDER2   = "#2a2a28"   # 稍深边框
-BORDER3   = "#333331"   # 最深边框
+BORDER    = "#D8E6F7"
+BORDER2   = "#B8D0EE"
+BORDER3   = "#8CB6E8"
 
-# ── 强调色：绿/青 ────────────────────────────────────────────
-TEAL      = "#5DCAA5"   # 主绿（文字/图标）
-TEAL_DK   = "#1D9E75"   # 深绿（按钮边框/焦点）
-TEAL_BG   = "#0A3828"   # 绿背景（激活导航按钮）
-TEAL_BG2  = "#04342C"   # 深绿背景（运行中徽章）
-GREEN     = "#97C459"   # 亮绿（在线/可激活统计）
-GREEN_BG  = "#173404"   # 绿背景（在线徽章）
+TEAL      = "#12B886"
+TEAL_DK   = "#087F5B"
+TEAL_BG   = "#DFF7EE"
+TEAL_BG2  = "#E6FCF5"
+GREEN     = "#2F9E44"
+GREEN_BG  = "#EAF8EF"
 
-# ── 强调色：琥珀/黄 ─────────────────────────────────────────
-AMBER     = "#EF9F27"   # 琥珀黄（警告/到期）
-AMBER_BG  = "#412402"   # 琥珀背景
+AMBER     = "#F08C00"
+AMBER_BG  = "#FFF3BF"
 
-# ── 强调色：红 ───────────────────────────────────────────────
-RED       = "#F7C1C1"   # 浅红（错误文字）
-RED_BG    = "#501313"   # 红背景（危险操作）
+RED       = "#E03131"
+RED_BG    = "#FFE3E3"
 
-# ── 文字层 ───────────────────────────────────────────────────
-TEXT      = "#c8c7c0"   # 主文字
-TEXT2     = "#B4B2A9"   # 次文字
-TEXT_MID  = "#888780"   # 中性文字
-TEXT_DIM  = "#5F5E5A"   # 暗淡文字
-TEXT_MUTE = "#444441"   # 极暗（表头/标签）
-TEXT_DARK = "#333331"   # 接近背景（状态栏信息）
+TEXT      = "#14213D"
+TEXT2     = "#243B53"
+TEXT_MID  = "#53657D"
+TEXT_DIM  = "#7B8BA0"
+TEXT_MUTE = "#9AABBF"
+TEXT_DARK = "#B4C3D6"
 
-# ── 字体 ─────────────────────────────────────────────────────
-MONO_FONT = "Consolas"
+MONO_FONT = "Microsoft YaHei UI"

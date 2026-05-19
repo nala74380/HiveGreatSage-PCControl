@@ -53,11 +53,13 @@ class StatusBarWidget(QWidget):
             f"background:{BG_DEEP}; border-top:1px solid {BG_PANEL};"
             f" font-family:'{MONO_FONT}',monospace; font-size:9px; color:{TEXT_DARK};"
         )
+        self._runtime_attached = False
         self._build()
         self._start_token_timer()
 
     def _build(self) -> None:
         lay = QHBoxLayout(self)
+        self._layout = lay
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(14)
 
@@ -74,29 +76,40 @@ class StatusBarWidget(QWidget):
         interval = self._app.config.get("sync.interval", 10)
         lay.addWidget(self._lbl(f"同步 {interval}s", TEXT_DARK))
 
-        # 局域网（如果 team_manager 存在）
-        try:
-            ip   = self._app.team_manager.lan_ip
-            port = self._app.team_manager.ws_server.port
-            self._lan_lbl = self._lbl(f"LAN {ip}:{port}", TEXT_DARK)
-            lay.addWidget(self._lan_lbl)
-            # 连接计数
-            self._ws_count_lbl = self._lbl("WS 0", TEXT_DARK)
-            lay.addWidget(self._ws_count_lbl)
-            self._app.team_manager.ws_server.device_connected.connect(self._update_ws_count)
-            self._app.team_manager.ws_server.device_disconnected.connect(self._update_ws_count)
-        except Exception:
-            pass
+        self._runtime_insert_index = lay.count()
+        self.attach_runtime_services()
 
         lay.addStretch()
 
-        from game.game_config import WINDOW_TITLE, GAME_VERSION
+        from core.utils.constants import APP_VERSION
+        from game.game_config import WINDOW_TITLE
         scr  = QApplication.primaryScreen()
         geom = scr.geometry() if scr else None
         res  = f"{geom.width()}×{geom.height()}" if geom else "—"
         lay.addWidget(self._lbl(
-            f"{WINDOW_TITLE} v{GAME_VERSION} · Windows · {res}", TEXT_DARK
+            f"{WINDOW_TITLE} v{APP_VERSION} · Windows · {res}", TEXT_DARK
         ))
+
+    def attach_runtime_services(self) -> None:
+        if getattr(self, "_runtime_attached", False):
+            return
+        team_manager = getattr(self._app, "team_manager", None)
+        if team_manager is None:
+            return
+        try:
+            ip = team_manager.lan_ip
+            port = team_manager.ws_server.port
+            self._lan_lbl = self._lbl(f"LAN {ip}:{port}", TEXT_DARK)
+            self._layout.insertWidget(self._runtime_insert_index, self._lan_lbl)
+            self._runtime_insert_index += 1
+            self._ws_count_lbl = self._lbl("WS 0", TEXT_DARK)
+            self._layout.insertWidget(self._runtime_insert_index, self._ws_count_lbl)
+            self._runtime_insert_index += 1
+            team_manager.ws_server.device_connected.connect(self._update_ws_count)
+            team_manager.ws_server.device_disconnected.connect(self._update_ws_count)
+            self._runtime_attached = True
+        except Exception:
+            pass
 
     def _lbl(self, text: str, color: str) -> QLabel:
         l = QLabel(text)

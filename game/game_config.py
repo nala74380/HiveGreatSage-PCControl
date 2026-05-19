@@ -26,7 +26,6 @@ r"""
 
 GAME_NAME     = "夜鸦"
 GAME_CODE     = "yeya"          # Verify 系统中的 code_name，需与 Verify 后台一致
-GAME_VERSION  = "1.0.0"
 
 # ── 项目 UUID（与 config/local.yaml → server.project_uuid 保持一致）──
 # 运行时实际从 Config.get("server.project_uuid") 读取，此处作为代码可读性声明。

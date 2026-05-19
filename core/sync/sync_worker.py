@@ -76,7 +76,7 @@ class SyncWorker(QThread):
     # ── 主循环 ──────────────────────────────────────────────────
 
     def run(self) -> None:
-        logger.info("SyncWorker 启动，同步间隔 %ds", self._interval_sec)
+        logger.info("SyncWorker 启动，立即拉取 Verify 设备列表，后续同步间隔 %ds", self._interval_sec)
 
         while not self.isInterruptionRequested():
             self._do_sync()
