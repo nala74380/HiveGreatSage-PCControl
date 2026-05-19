@@ -3,14 +3,14 @@ r"""
 名称: 设备账号设置页
 作者: 蜂巢·大圣 (HiveGreatSage)
 时间: 2026-05-19
-版本: V1.2.0
-状态: P4 账号设置页 Ymir-CC 风格重整
+版本: V1.3.0
+状态: P4 账号设置页可用性重排
 功能及相关说明:
   DeviceSettingsDialog 的账号设置页。
   当前为单设备游戏账号设置，不是 PC 登录账号，也不是 Verify 用户账号。
 
 边界说明:
-  - 账号设置页整体结构按 Ymir-CC 风格调整为：顶部操作区 + 账号表格 + 安全提示。
+  - 账号设置页整体结构按 Ymir-CC 风格组织为：顶部操作区 + 主账号表 + 账号详情区 + 安全提示。
   - 当前账号来源只允许：手动输入、客户外部账号数据库。
   - 当前 P4 第一轮只保留一行账号草稿，不声称账号池 / 客户数据库闭环完成。
   - 密码使用 PasswordEditor，默认隐藏，支持显示 / 隐藏 / 复制 / 编辑 / 右键菜单。
@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -78,14 +79,6 @@ class AccountSettingsPage(QWidget):
         "游戏密码",
         "验证邮箱",
         "邮箱密码",
-        "大区",
-        "小区",
-        "主角色",
-        "职业",
-        "上次登录",
-        "邮件验证",
-        "账号状态",
-        "备注",
     ]
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -99,10 +92,11 @@ class AccountSettingsPage(QWidget):
         lay.setSpacing(9)
 
         self._section(lay, "游戏账号设置")
-        lay.addWidget(self._hint("账号设置页里的账号是游戏账号，不是 PC 登录账号。页面结构按 Ymir-CC 风格组织为账号表格。"))
+        lay.addWidget(self._hint("账号设置页里的账号是游戏账号，不是 PC 登录账号。主账号表只保留高频字段，低频字段放入下方详情区，避免横向挤压。"))
         lay.addWidget(self._build_toolbar())
         self._account_table = self._build_account_table()
         lay.addWidget(self._account_table)
+        lay.addWidget(self._build_detail_panel())
         lay.addWidget(self._hint("当前 P4 第一轮只保留一行账号草稿；后续是否支持多账号 / 客户数据库字段映射，必须在 P6 或后续阶段确认。"))
         lay.addWidget(self._hint("真实密码和邮箱密码不会写入本地普通草稿 JSON；草稿只记录 password_present / email_password_present。"))
         lay.addStretch()
@@ -157,20 +151,21 @@ class AccountSettingsPage(QWidget):
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        table.setMinimumHeight(150)
-        table.setMaximumHeight(190)
+        table.setMinimumHeight(122)
+        table.setMaximumHeight(136)
         table.setStyleSheet(
             f"QTableWidget {{ background:{BG_DEEP}; color:{TEXT}; border:1px solid {BORDER}; gridline-color:{BORDER}; }}"
-            f"QHeaderView::section {{ background:{BG_ITEM}; color:{TEXT_MID}; border:0.5px solid {BORDER}; padding:4px; }}"
+            f"QHeaderView::section {{ background:{BG_ITEM}; color:{TEXT_MID}; border:0.5px solid {BORDER}; padding:5px; }}"
             f"QTableWidget::item:selected {{ background:#0a1e17; color:{TEAL}; }}"
         )
 
         hdr = table.horizontalHeader()
-        widths = [52, 62, 150, 110, 150, 260, 160, 220, 90, 90, 110, 90, 130, 130, 100, 180]
+        widths = [48, 58, 150, 110, 170, 310, 170, 300]
         for col, width in enumerate(widths):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             table.setColumnWidth(col, width)
         hdr.setStretchLastSection(True)
+        table.setRowHeight(0, 52)
 
         seq = QTableWidgetItem("1")
         seq.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -211,36 +206,42 @@ class AccountSettingsPage(QWidget):
         self._password_editors.append(self._email_password)
         table.setCellWidget(0, 7, self._email_password)
 
+        table.selectRow(0)
+        return table
+
+    def _build_detail_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setStyleSheet(f"background:{BG_ITEM}; border:0.5px solid {BORDER}; border-radius:5px;")
+        grid = QGridLayout(panel)
+        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+
         self._game_region = self._line_edit("大区")
-        table.setCellWidget(0, 8, self._game_region)
-
         self._game_sub_region = self._line_edit("小区")
-        table.setCellWidget(0, 9, self._game_sub_region)
-
         self._main_role = self._line_edit("主角色")
-        table.setCellWidget(0, 10, self._main_role)
-
         self._profession = self._line_edit("职业")
-        table.setCellWidget(0, 11, self._profession)
-
         self._last_login_at = self._line_edit("上次登录")
-        table.setCellWidget(0, 12, self._last_login_at)
-
         self._last_email_verify_at = self._line_edit("邮件验证")
-        table.setCellWidget(0, 13, self._last_email_verify_at)
-
         self._account_status = QComboBox()
         self._account_status.addItem("未验证", "unknown")
         self._account_status.addItem("可用", "available")
         self._account_status.addItem("异常", "error")
         self._account_status.addItem("停用", "disabled")
-        table.setCellWidget(0, 14, self._account_status)
-
         self._remark = self._line_edit("备注")
-        table.setCellWidget(0, 15, self._remark)
 
-        table.selectRow(0)
-        return table
+        self._add_detail_row(grid, 0, 0, "大区", self._game_region)
+        self._add_detail_row(grid, 0, 2, "小区", self._game_sub_region)
+        self._add_detail_row(grid, 1, 0, "主角色", self._main_role)
+        self._add_detail_row(grid, 1, 2, "职业", self._profession)
+        self._add_detail_row(grid, 2, 0, "上次登录", self._last_login_at)
+        self._add_detail_row(grid, 2, 2, "邮件验证", self._last_email_verify_at)
+        self._add_detail_row(grid, 3, 0, "账号状态", self._account_status)
+        self._add_detail_row(grid, 3, 2, "备注", self._remark)
+
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        return panel
 
     def draft(self) -> AccountSettingsDraft:
         return AccountSettingsDraft(
@@ -298,9 +299,18 @@ class AccountSettingsPage(QWidget):
         self.status_message.emit("密码已显示。" if visible else "密码已隐藏。", True)
 
     @staticmethod
+    def _add_detail_row(grid: QGridLayout, row: int, col: int, label_text: str, widget: QWidget) -> None:
+        label = QLabel(label_text)
+        label.setStyleSheet(f"color:{TEXT_MID}; font-size:11px;")
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(label, row, col)
+        grid.addWidget(widget, row, col + 1)
+
+    @staticmethod
     def _line_edit(placeholder: str) -> QLineEdit:
         edit = QLineEdit()
         edit.setPlaceholderText(placeholder)
+        edit.setMinimumHeight(28)
         edit.setStyleSheet(
             f"background:{BG_DEEP}; border:0.5px solid {BORDER}; border-radius:4px; "
             f"color:{TEXT}; padding:5px 8px; font-family:'{MONO_FONT}',monospace; font-size:11px;"
