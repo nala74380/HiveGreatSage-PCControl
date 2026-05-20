@@ -102,6 +102,14 @@ def _connection_text(dev: DeviceInfo) -> str:
     return dev.connection_label or "—"
 
 
+def _is_normal_android_status(dev: DeviceInfo) -> bool:
+    return (dev.api_status or "").strip().lower() in {"idle", "running"}
+
+
+def _needs_activation_command(dev: DeviceInfo) -> bool:
+    return (dev.api_status or "").strip().lower() in {"offline", "error"}
+
+
 class ActivateWorker(QThread):
     """ADB 激活线程。"""
 
@@ -470,6 +478,18 @@ class DevicePage(QWidget):
             logger.info("解绑设备: %s（Phase 2 实现）", _device_key(dev)[:12])
 
     def _do_activate(self, dev: DeviceInfo) -> None:
+        if _is_normal_android_status(dev):
+            QMessageBox.information(self, "无需激活", f"设备 {dev.display_id} 状态正常，已视为激活。")
+            return
+
+        if not _needs_activation_command(dev):
+            QMessageBox.warning(
+                self,
+                "激活失败",
+                f"设备 {dev.display_id} 当前状态为 {dev.api_status or '未知'}，只支持离线/异常状态下发激活命令。",
+            )
+            return
+
         if not dev.adb_serial:
             QMessageBox.warning(self, "激活失败", f"设备 {dev.display_id} 未通过 ADB 连接。")
             return
@@ -488,10 +508,7 @@ class DevicePage(QWidget):
 
     def _on_activate_done(self, serial: str, ok: bool, msg: str) -> None:
         if ok:
-            QMessageBox.information(self, "激活成功", f"{serial}\n{msg}")
-            device_id = next((_device_key(d) for d in self._devices if d.adb_serial == serial), "")
-            if device_id:
-                self._app.device_manager.update_meta(device_id, activated=True)
+            QMessageBox.information(self, "激活命令已下发", f"{serial}\n{msg}\n\n安卓端状态恢复正常后，列表会显示为已激活。")
         else:
             QMessageBox.warning(self, "激活失败", f"{serial}\n{msg}")
         self._activate_workers = [w for w in self._activate_workers if w.isRunning()]

@@ -9,7 +9,7 @@ r"""
   设备绑定主键统一为 device_id。
   数据来源：
     1. Verify API 响应：device_id / status / last_seen / game_data / is_online
-    2. 本地元数据文件 config/device_meta.json：role / note / activated，用户可编辑
+    2. 本地元数据文件 config/device_meta.json：role / note，用户可编辑
     3. PC 中控侧 ADB 查询：connection_type / connection_label / adb_serial / adb_connected
 
 改进内容:
@@ -62,6 +62,10 @@ class DeviceInfo:
     adb_serial: str = ""
     adb_connected: bool = False
 
+    @staticmethod
+    def is_activated_status(status: str) -> bool:
+        return (status or "").strip().lower() in {"idle", "running"}
+
     @property
     def display_id(self) -> str:
         return self.device_id or "—"
@@ -99,10 +103,11 @@ class DeviceInfo:
             except ValueError:
                 last_seen = None
 
+        api_status = api_data.get("status") or "offline"
         return cls(
             device_id=api_data.get("device_id", "") or "",
             user_id=api_data.get("user_id", 0),
-            api_status=api_data.get("status") or "offline",
+            api_status=api_status,
             last_seen=last_seen,
             game_data=game_data,
             is_online=api_data.get("is_online", False),
@@ -112,7 +117,7 @@ class DeviceInfo:
             server=str(game_data.get("server", "")),
             role=meta.get("role", ""),
             note=meta.get("note", ""),
-            activated=meta.get("activated", False),
+            activated=cls.is_activated_status(api_status),
             connection_type="",
             connection_label="",
             adb_serial="",

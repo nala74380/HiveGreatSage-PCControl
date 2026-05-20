@@ -169,6 +169,7 @@ class AuthManager:
         self._user_info = UserInfo(
             username=data.get("username", username),
             display_name=data.get("username", username),
+            user_level=data.get("authorization_level", ""),
             project_uuid=project_uuid,
         )
         self._sync_api_token()
@@ -201,6 +202,14 @@ class AuthManager:
                 inactive_devices=None if inactive_devices is None else int(inactive_devices or 0),
             )
             self._auth_info = me_data
+            logger.info(
+                "授权摘要已刷新: level=%s quota=%s activated=%s inactive=%s valid_until=%s",
+                self._user_info.user_level,
+                self._user_info.device_quota,
+                self._user_info.activated_devices,
+                self._user_info.inactive_devices,
+                self._user_info.expired_at,
+            )
         except Exception as e:
             logger.warning("获取 /me 失败: %s", e)
 

@@ -32,12 +32,13 @@ logger = logging.getLogger(__name__)
 _PROJ_ROOT = Path(__file__).resolve().parents[2]
 ADB_EXE    = _PROJ_ROOT / "tools" / "adb" / "platform-tools" / "adb.exe"
 
-# 激活命令序列（依次执行，任一失败即中止）
-ACTIVATE_CMDS = [
-    "cp /sdcard/Download/proxy /data/local/tmp/proxy",
-    "chmod 777 /data/local/tmp/proxy",
-    "/data/local/tmp/proxy --daemon",
-]
+# Android offline/error recovery command.  A normal Android runtime status
+# means the device is already activated.
+ACTIVATE_COMMAND = (
+    "cp /sdcard/Download/proxy /data/local/tmp/proxy;"
+    "chmod 777 /data/local/tmp/proxy;"
+    "/data/local/tmp/proxy --daemon"
+)
 
 DEFAULT_TCP_PORT = 5555
 ADB_TIMEOUT      = 10   # 秒，单条命令超时
@@ -277,10 +278,8 @@ class AdbManager:
         """
         向目标设备部署并启动代理守护进程（ROOT 激活模式）。
 
-        执行顺序:
-            1. cp /sdcard/Download/proxy /data/local/tmp/proxy
-            2. chmod 777 /data/local/tmp/proxy
-            3. /data/local/tmp/proxy --daemon
+        执行命令:
+            adb shell cp /sdcard/Download/proxy /data/local/tmp/proxy;chmod 777 /data/local/tmp/proxy;/data/local/tmp/proxy --daemon
 
         Returns:
             (success: bool, message: str)
@@ -296,16 +295,12 @@ class AdbManager:
             logger.error(msg)
             return False, msg
 
-        results = self.shell_batch(serial, ACTIVATE_CMDS, stop_on_error=True)
+        result = self.shell(serial, ACTIVATE_COMMAND)
+        if result.success:
+            logger.info("[%s] 激活命令已下发，等待安卓端心跳恢复", serial)
+            return True, "激活命令已下发，等待安卓端状态恢复正常"
 
-        # 检查最后一条是否是 daemon 启动
-        if len(results) == len(ACTIVATE_CMDS) and all(r.success for r in results):
-            logger.info("[%s] 激活成功，代理守护进程已启动", serial)
-            return True, "激活成功"
-
-        failed_idx = next((i for i, r in enumerate(results) if not r.success), -1)
-        failed_cmd = ACTIVATE_CMDS[failed_idx] if failed_idx >= 0 else "unknown"
-        msg = f"激活失败，第 {failed_idx + 1} 步出错: {failed_cmd}\n输出: {results[failed_idx].output}"
+        msg = f"激活命令执行失败: {ACTIVATE_COMMAND}\n输出: {result.output}"
         logger.error("[%s] %s", serial, msg)
         return False, msg
 

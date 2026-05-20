@@ -151,7 +151,7 @@ def _badge(text: str, bg: str, fg: str, font_size: int = 11) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(
         f"background:{bg}; color:{fg}; border-radius:8px;"
-        f" padding:2px 8px; font-size:{font_size}px;"
+        f" padding:3px 10px; font-size:{font_size}px; font-weight:800;"
     )
     return lbl
 
@@ -168,6 +168,39 @@ def _label(text: str, color: str = TEXT_MUTE, size: int = 12) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(f"color:{color}; font-size:{size}px;")
     return lbl
+
+
+def _metric_label(text: str, color: str = TEXT_MID, size: int = 13) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"color:{color}; font-size:{size}px; font-weight:800;")
+    return lbl
+
+
+def _level_display(level: str) -> str:
+    mapping = {
+        "trial": "试用",
+        "normal": "普通",
+        "vip": "VIP",
+        "svip": "SVIP",
+        "tester": "测试",
+    }
+    key = (level or "normal").strip().lower()
+    return mapping.get(key, level or "普通")
+
+
+def _is_tester_level(level: str) -> bool:
+    return (level or "").strip().lower() == "tester"
+
+
+def _level_colors(level: str) -> tuple[str, str]:
+    mapping = {
+        "trial": ("#FFF3BF", "#B7791F"),
+        "normal": ("#EAF4FF", "#2F80ED"),
+        "vip": ("#FFE8CC", "#D9480F"),
+        "svip": ("#EDEBFF", "#6C5CE7"),
+        "tester": ("#E6FCF5", "#087F5B"),
+    }
+    return mapping.get((level or "normal").strip().lower(), ("#EEF6FF", TEXT_MID))
 
 
 class TopBar(QWidget):
@@ -202,15 +235,8 @@ class TopBar(QWidget):
         acct_lay.setContentsMargins(14, 0, 14, 0)
         acct_lay.setSpacing(8)
         acct_lay.addWidget(_label(user.display_name or user.username, TEXT, 14))
-        level_colors = {
-            "vip": (AMBER_BG, AMBER),
-            "svip": ("#EDEBFF", "#6C5CE7"),
-            "tester": (TEAL_BG2, TEAL),
-            "normal": (BG_ITEM, TEXT_MID),
-            "trial": (BG_ITEM, TEXT_DIM),
-        }
-        bg, fg = level_colors.get(user.user_level, (BG_ITEM, TEXT_MID))
-        self._level_badge = _badge((user.user_level or "normal").upper(), bg, fg, 10)
+        bg, fg = _level_colors(user.user_level)
+        self._level_badge = _badge(_level_display(user.user_level), bg, fg, 13)
         acct_lay.addWidget(self._level_badge)
         lay.addWidget(acct)
         lay.addWidget(_sep_v())
@@ -220,16 +246,16 @@ class TopBar(QWidget):
         stat_lay = QHBoxLayout(stat)
         stat_lay.setContentsMargins(14, 0, 14, 0)
         stat_lay.setSpacing(5)
-        self._lbl_ava_auth = _label(str(user.device_quota) if user.device_quota > 0 else "无限", GREEN, 14)
-        self._lbl_act_auth = _label(str(user.activated_devices), TEAL, 14)
-        self._lbl_inact_auth = _label(str(user.inactive_devices) if user.inactive_devices is not None else "—", TEXT_MID, 14)
+        self._lbl_ava_auth = _metric_label(str(user.device_quota) if user.device_quota > 0 else "无限", GREEN, 16)
+        self._lbl_act_auth = _metric_label(str(user.activated_devices), TEAL, 16)
+        self._lbl_inact_auth = _metric_label(str(user.inactive_devices) if user.inactive_devices is not None else "—", TEXT_MID, 16)
         for txt, value_label in [
             ("可激活", self._lbl_ava_auth),
             ("已激活", self._lbl_act_auth),
             ("未激活", self._lbl_inact_auth),
         ]:
-            stat_lay.addWidget(_label(txt, TEXT_MUTE, 10))
-            stat_lay.addWidget(_label("/", BORDER2, 11))
+            stat_lay.addWidget(_metric_label(txt, TEXT_MID, 13))
+            stat_lay.addWidget(_metric_label("/", BORDER2, 13))
             stat_lay.addWidget(value_label)
             stat_lay.addSpacing(8)
         lay.addWidget(stat)
@@ -240,12 +266,13 @@ class TopBar(QWidget):
         exp_lay = QHBoxLayout(exp)
         exp_lay.setContentsMargins(14, 0, 14, 0)
         exp_lay.setSpacing(5)
-        exp_lay.addWidget(_label("到期：", TEXT_DIM, 11))
+        exp_lay.addWidget(_metric_label("到期：", TEXT_MID, 13))
         expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
-        self._lbl_expiry_auth = _label(expiry, AMBER, 12)
+        self._lbl_expiry_auth = _metric_label(expiry, AMBER, 16)
         exp_lay.addWidget(self._lbl_expiry_auth)
         lay.addWidget(exp)
-        lay.addWidget(_sep_v())
+        self._conn_sep = _sep_v()
+        lay.addWidget(self._conn_sep)
 
         conn = QWidget()
         conn.setFixedHeight(48)
@@ -256,7 +283,9 @@ class TopBar(QWidget):
         api_host = (self._app.config.get("server.api_base_url", "")
                     .replace("http://", "").replace("https://", ""))
         conn_lay.addWidget(_label(f"已连接 · {api_host}", TEAL, 12))
-        lay.addWidget(conn)
+        self._conn_widget = conn
+        lay.addWidget(self._conn_widget)
+        self._set_connection_visibility(user.user_level)
         lay.addStretch()
 
         self._sync_lbl = _label("等待同步...", TEXT_MUTE, 11)
@@ -294,19 +323,18 @@ class TopBar(QWidget):
         expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
         self._lbl_expiry_auth.setText(expiry)
 
-        level_colors = {
-            "vip": (AMBER_BG, AMBER),
-            "svip": ("#EDEBFF", "#6C5CE7"),
-            "tester": (TEAL_BG2, TEAL),
-            "normal": (BG_ITEM, TEXT_MID),
-            "trial": (BG_ITEM, TEXT_DIM),
-        }
-        bg, fg = level_colors.get(user.user_level, (BG_ITEM, TEXT_MID))
-        self._level_badge.setText((user.user_level or "normal").upper())
+        bg, fg = _level_colors(user.user_level)
+        self._level_badge.setText(_level_display(user.user_level))
         self._level_badge.setStyleSheet(
             f"background:{bg}; color:{fg}; border-radius:8px;"
-            " padding:2px 8px; font-size:10px;"
+            " padding:3px 10px; font-size:13px; font-weight:800;"
         )
+        self._set_connection_visibility(user.user_level)
+
+    def _set_connection_visibility(self, user_level: str) -> None:
+        visible = _is_tester_level(user_level)
+        self._conn_sep.setVisible(visible)
+        self._conn_widget.setVisible(visible)
 
     def update_stats(self, total: int, online: int) -> None:
         self._sync_lbl.setText("已同步")
@@ -557,6 +585,9 @@ class MainWindow(QMainWindow):
 
     def update_stats(self, total: int, online: int) -> None:
         self._topbar.update_stats(total, online)
+
+    def update_auth_stats(self) -> None:
+        self._topbar.update_auth_stats()
 
     def closeEvent(self, event) -> None:
         if hasattr(self._app, "_stop_runtime_services"):
