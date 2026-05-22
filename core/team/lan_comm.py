@@ -242,3 +242,10 @@ class WSServer(QObject):
     @property
     def connected_ids(self) -> list[str]:
         return list(self._connections.keys())
+
+    @property
+    def is_listening(self) -> bool:
+        try:
+            return bool(self._server and self._server.isListening())
+        except Exception:
+            return False

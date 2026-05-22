@@ -23,7 +23,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from core.utils.constants import APP_VERSION
 from ui.pages.device_page import DevicePage
@@ -147,10 +147,10 @@ QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 0; }}
 """
 
 
-def _badge(text: str, bg: str, fg: str, font_size: int = 11) -> QLabel:
+def _badge(text: str, bg: str, fg: str, font_size: int = 11, border: str | None = None) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(
-        f"background:{bg}; color:{fg}; border-radius:8px;"
+        f"background:{bg}; color:{fg}; border:1px solid {border or bg}; border-radius:8px;"
         f" padding:3px 10px; font-size:{font_size}px; font-weight:800;"
     )
     return lbl
@@ -192,15 +192,15 @@ def _is_tester_level(level: str) -> bool:
     return (level or "").strip().lower() == "tester"
 
 
-def _level_colors(level: str) -> tuple[str, str]:
+def _level_colors(level: str) -> tuple[str, str, str]:
     mapping = {
-        "trial": ("#FFF3BF", "#B7791F"),
-        "normal": ("#EAF4FF", "#2F80ED"),
-        "vip": ("#FFE8CC", "#D9480F"),
-        "svip": ("#EDEBFF", "#6C5CE7"),
-        "tester": ("#E6FCF5", "#087F5B"),
+        "trial": ("#FFF7D6", "#9A6700", "#F2C94C"),
+        "normal": ("#E7F1FF", "#1C5DB6", "#74A9FF"),
+        "vip": ("#FFE8D6", "#C2410C", "#FF8A4C"),
+        "svip": ("#EFE7FF", "#5B3DB8", "#A78BFA"),
+        "tester": ("#E3FAF0", "#087F5B", "#63D9A7"),
     }
-    return mapping.get((level or "normal").strip().lower(), ("#EEF6FF", TEXT_MID))
+    return mapping.get((level or "normal").strip().lower(), ("#EEF6FF", TEXT_MID, BORDER2))
 
 
 class TopBar(QWidget):
@@ -235,8 +235,8 @@ class TopBar(QWidget):
         acct_lay.setContentsMargins(14, 0, 14, 0)
         acct_lay.setSpacing(8)
         acct_lay.addWidget(_label(user.display_name or user.username, TEXT, 14))
-        bg, fg = _level_colors(user.user_level)
-        self._level_badge = _badge(_level_display(user.user_level), bg, fg, 13)
+        bg, fg, border = _level_colors(user.user_level)
+        self._level_badge = _badge(_level_display(user.user_level), bg, fg, 13, border)
         acct_lay.addWidget(self._level_badge)
         lay.addWidget(acct)
         lay.addWidget(_sep_v())
@@ -297,7 +297,7 @@ class TopBar(QWidget):
         lay.addWidget(settings_btn)
         lay.addSpacing(6)
 
-        logout_btn = QPushButton("退出登录")
+        logout_btn = QPushButton("切换账号")
         logout_btn.clicked.connect(self._on_logout)
         lay.addWidget(logout_btn)
         lay.addSpacing(10)
@@ -323,10 +323,10 @@ class TopBar(QWidget):
         expiry = user.expired_at[:10] if user.expired_at and len(user.expired_at) >= 10 else (user.expired_at or "—")
         self._lbl_expiry_auth.setText(expiry)
 
-        bg, fg = _level_colors(user.user_level)
+        bg, fg, border = _level_colors(user.user_level)
         self._level_badge.setText(_level_display(user.user_level))
         self._level_badge.setStyleSheet(
-            f"background:{bg}; color:{fg}; border-radius:8px;"
+            f"background:{bg}; color:{fg}; border:1px solid {border}; border-radius:8px;"
             " padding:3px 10px; font-size:13px; font-weight:800;"
         )
         self._set_connection_visibility(user.user_level)
@@ -346,8 +346,17 @@ class TopBar(QWidget):
             win.open_settings()
 
     def _on_logout(self) -> None:
-        self._app.auth.logout()
-        QApplication.quit()
+        ret = QMessageBox.question(
+            self.window(),
+            "切换账号",
+            "切换账号会关闭自动登录，并清除当前记住的账号密码。\n\n确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        if hasattr(self._app, "switch_account"):
+            self._app.switch_account()
 
     def _minimize_window(self) -> None:
         self.window().showMinimized()
@@ -578,6 +587,11 @@ class MainWindow(QMainWindow):
 
     def _on_sync_error(self, msg: str) -> None:
         logger.warning("同步错误: %s", msg)
+        self.post_status(f"同步错误：{msg}", level="warn", timeout_ms=6000)
+
+    def post_status(self, text: str, level: str = "info", timeout_ms: int = 3500) -> None:
+        if hasattr(self, "_statusbar") and hasattr(self._statusbar, "post_status"):
+            self._statusbar.post_status(text, level=level, timeout_ms=timeout_ms)
 
     def _on_token_expired(self) -> None:
         """备用入口；实际处理由 Application._on_token_expired() 负责。"""

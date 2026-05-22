@@ -18,6 +18,8 @@ r"""
 from __future__ import annotations
 
 import logging
+import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -181,6 +184,7 @@ class GlobalSettingsDialog(QDialog):
         tabs = [
             ("服务器连接", self._build_server_page),
             ("网络配置", self._build_network_page),
+            ("运行守护", self._build_runtime_page),
             ("客户外部账号数据库", self._build_external_account_db_page),
             ("接码平台", self._build_sms_provider_page),
             ("邮箱服务", self._build_mail_service_page),
@@ -252,6 +256,49 @@ class GlobalSettingsDialog(QDialog):
         self._network_failover.setChecked(bool(self._app.config.get("network.allow_failover", True)))
         lay.addWidget(self._network_failover)
         lay.addWidget(self._hint("P2 阶段先迁移已有配置；候选 API 地址编辑器后续单独实现。"))
+        lay.addStretch()
+        return page
+
+    def _build_runtime_page(self) -> QWidget:
+        page, lay = self._scrollable_page()
+        self._section(lay, "自动登录")
+        self._auth_auto_login = QCheckBox("启动时使用已保存账号密码自动登录")
+        self._auth_auto_login.setChecked(bool(self._app.config.get("auth.auto_login_enabled", False)))
+        lay.addWidget(self._auth_auto_login)
+        lay.addWidget(self._hint("仅在用户已勾选“记住密码”且系统凭据可读取时生效；切换账号会自动关闭本项。"))
+
+        self._section(lay, "运行守护")
+        self._runtime_restart_on_crash = QCheckBox("主程序异常退出后由守护进程自动重启")
+        self._runtime_restart_on_crash.setChecked(bool(self._app.config.get("runtime.restart_on_crash", False)))
+        lay.addWidget(self._runtime_restart_on_crash)
+        form = self._form()
+        self._runtime_restart_delay = QSpinBox()
+        self._runtime_restart_delay.setRange(3, 300)
+        self._runtime_restart_delay.setValue(int(self._app.config.get("runtime.restart_delay_seconds", 5) or 5))
+        self._runtime_restart_delay.setSuffix(" 秒")
+        form.addRow("重启等待", self._runtime_restart_delay)
+        lay.addLayout(form)
+        lay.addWidget(self._hint("安装守护任务后，Windows 登录时由 watchdog 启动 PC 中控；直接运行 main.py 时无法在崩溃后自我拉起。"))
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        preview_btn = QPushButton("预演安装")
+        preview_btn.setObjectName("test-btn")
+        preview_btn.clicked.connect(self._preview_watchdog_task_install)
+        action_row.addWidget(preview_btn)
+
+        install_btn = QPushButton("安装/更新守护任务")
+        install_btn.setObjectName("save-btn")
+        install_btn.clicked.connect(self._install_watchdog_task)
+        action_row.addWidget(install_btn)
+
+        uninstall_btn = QPushButton("卸载守护任务")
+        uninstall_btn.setObjectName("danger-btn")
+        uninstall_btn.clicked.connect(self._uninstall_watchdog_task)
+        action_row.addWidget(uninstall_btn)
+        action_row.addStretch()
+        lay.addLayout(action_row)
+        lay.addWidget(self._hint("安装/更新不会立即启动 watchdog，避免当前主平台已运行时双开；卸载只删除计划任务，不删除账号凭据。"))
         lay.addStretch()
         return page
 
@@ -419,6 +466,12 @@ class GlobalSettingsDialog(QDialog):
 
     # ── 保存 ──────────────────────────────────────
 
+    def _save_runtime_settings(self) -> None:
+        cfg = self._app.config
+        cfg.set_local("auth.auto_login_enabled", self._auth_auto_login.isChecked())
+        cfg.set_local("runtime.restart_on_crash", self._runtime_restart_on_crash.isChecked())
+        cfg.set_local("runtime.restart_delay_seconds", self._runtime_restart_delay.value())
+
     def _save(self) -> None:
         cfg = self._app.config
         cfg.set_local("server.api_base_url", self._api_url_edit.text().strip())
@@ -428,6 +481,8 @@ class GlobalSettingsDialog(QDialog):
         cfg.set_local("network.refresh_on_startup", self._network_refresh_startup.isChecked())
         cfg.set_local("network.refresh_after_login", self._network_refresh_login.isChecked())
         cfg.set_local("network.allow_failover", self._network_failover.isChecked())
+
+        self._save_runtime_settings()
 
         cfg.set_local("external_account_db.enabled", self._external_db_enabled.isChecked())
         cfg.set_local("external_account_db.driver", self._external_db_driver.currentData())
@@ -469,6 +524,95 @@ class GlobalSettingsDialog(QDialog):
 
         logger.info("全局设置已保存到 config/local.yaml")
         self._set_status("全局设置已保存。部分设置可能需要重启后生效。")
+
+    # ── 运行守护脚本 ──────────────────────────────
+
+    def _preview_watchdog_task_install(self) -> None:
+        self._save_runtime_settings()
+        self._run_watchdog_task_script("install_watchdog_task.ps1", ["-WhatIf"], "守护任务预演安装完成")
+
+    def _install_watchdog_task(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "安装/更新守护任务",
+            "将注册 Windows 计划任务：用户登录 Windows 后自动启动 PC 中控 watchdog。\n\n"
+            "当前不会立即启动 watchdog，避免主平台双开。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._save_runtime_settings()
+        self._run_watchdog_task_script("install_watchdog_task.ps1", [], "守护任务已安装/更新")
+
+    def _uninstall_watchdog_task(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "卸载守护任务",
+            "将删除 Windows 计划任务 HiveGreatSage-PCControl-Watchdog。\n\n"
+            "这不会删除已保存账号密码，也不会关闭当前正在运行的 PC 中控。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._run_watchdog_task_script("uninstall_watchdog_task.ps1", [], "守护任务卸载检查完成")
+
+    def _run_watchdog_task_script(self, script_name: str, args: list[str], success_text: str) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        script_path = repo_root / "scripts" / script_name
+        if not script_path.exists():
+            msg = f"守护脚本不存在：{script_path}"
+            self._set_status(msg, warn=True)
+            QMessageBox.warning(self, "守护脚本不存在", msg)
+            return
+
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            *args,
+        ]
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=creationflags,
+                timeout=30,
+            )
+        except Exception as exc:
+            logger.exception("执行守护脚本失败: %s", script_path)
+            msg = f"执行守护脚本失败：{exc}"
+            self._set_status(msg, warn=True)
+            QMessageBox.warning(self, "守护脚本执行失败", msg)
+            return
+
+        output = "\n".join(
+            part.strip()
+            for part in (result.stdout, result.stderr)
+            if part and part.strip()
+        )
+        if not output:
+            output = "脚本未返回输出。"
+
+        if result.returncode != 0:
+            msg = f"守护脚本执行失败，退出码：{result.returncode}"
+            self._set_status(msg, warn=True)
+            QMessageBox.warning(self, "守护脚本执行失败", f"{msg}\n\n{output[:2000]}")
+            return
+
+        self._set_status(success_text)
+        QMessageBox.information(self, success_text, output[:2000])
 
     # ── 工具方法 ──────────────────────────────────
 
@@ -520,3 +664,5 @@ class GlobalSettingsDialog(QDialog):
         self._status_label.setStyleSheet(
             f"color:{AMBER if warn else TEAL}; font-size:10px;"
         )
+        if hasattr(self._app, "post_status"):
+            self._app.post_status(text, level="warn" if warn else "ok")

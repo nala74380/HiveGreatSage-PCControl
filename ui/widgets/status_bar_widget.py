@@ -68,6 +68,10 @@ class StatusBarWidget(QWidget):
         self._conn_lbl = self._lbl(f"● {api}", "#0F6E56")
         lay.addWidget(self._conn_lbl)
 
+        self._status_seq = 0
+        self._message_lbl = self._lbl("就绪", TEXT_DARK)
+        lay.addWidget(self._message_lbl)
+
         # Token 倒计时
         self._token_lbl = self._lbl("Token —", TEXT_DARK)
         lay.addWidget(self._token_lbl)
@@ -105,8 +109,11 @@ class StatusBarWidget(QWidget):
             self._ws_count_lbl = self._lbl("WS 0", TEXT_DARK)
             self._layout.insertWidget(self._runtime_insert_index, self._ws_count_lbl)
             self._runtime_insert_index += 1
+            team_manager.ws_server.started.connect(self._on_ws_started)
+            team_manager.ws_server.server_error.connect(self._on_ws_error)
             team_manager.ws_server.device_connected.connect(self._update_ws_count)
             team_manager.ws_server.device_disconnected.connect(self._update_ws_count)
+            self._update_ws_count()
             self._runtime_attached = True
         except Exception:
             pass
@@ -159,5 +166,38 @@ class StatusBarWidget(QWidget):
         count = self._app.team_manager.connected_count
         if hasattr(self, "_ws_count_lbl"):
             self._ws_count_lbl.setText(f"WS {count}")
-            color = TEAL if count > 0 else TEXT_DARK
+            is_listening = bool(getattr(self._app.team_manager.ws_server, "is_listening", False))
+            color = TEAL if is_listening else TEXT_DARK
             self._ws_count_lbl.setStyleSheet(f"color:{color}; font-size:9px;")
+
+    def _on_ws_started(self, *_args) -> None:
+        self._update_ws_count()
+
+    def _on_ws_error(self, *_args) -> None:
+        if hasattr(self, "_ws_count_lbl"):
+            self._ws_count_lbl.setStyleSheet("color:#FF6B6B; font-size:9px;")
+
+    def post_status(self, text: str, level: str = "info", timeout_ms: int = 3500) -> None:
+        colors = {
+            "ok": TEAL,
+            "success": TEAL,
+            "warn": AMBER,
+            "warning": AMBER,
+            "error": "#FF6B6B",
+            "info": TEXT_MID,
+        }
+        self._status_seq += 1
+        seq = self._status_seq
+        color = colors.get(level, TEXT_MID)
+        self._message_lbl.setText(text)
+        self._message_lbl.setStyleSheet(f"color:{color}; font-size:9px;")
+        if timeout_ms <= 0:
+            return
+
+        def restore() -> None:
+            if seq != self._status_seq:
+                return
+            self._message_lbl.setText("就绪")
+            self._message_lbl.setStyleSheet(f"color:{TEXT_DARK}; font-size:9px;")
+
+        QTimer.singleShot(timeout_ms, restore)

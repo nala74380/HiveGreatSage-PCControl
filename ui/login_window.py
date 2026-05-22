@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QDialog,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -283,29 +282,25 @@ class LoginWindow(QDialog):
     # ── UI 构建 ───────────────────────────
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 16, 40, 32)
+        root.setContentsMargins(40, 56, 40, 32)
         root.setSpacing(0)
 
         # ── 自定义关闭按鈕（无标题栏，右上角）──
-        close_row = QHBoxLayout()
-        close_row.setContentsMargins(0, 0, 0, 0)
-        close_row.addStretch()
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(42, 42)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
+        self._close_btn = QPushButton("×", self)
+        self._close_btn.setFixedSize(54, 54)
+        self._close_btn.move(self.width() - 92, 20)
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.setStyleSheet(
             "QPushButton { border: none; background: transparent;"
-            f" color: {_TEXT_HINT}; font-size: 27px; font-weight: 300; }}"
+            f" color: {_TEXT_HINT}; font-size: 36px; font-weight: 300; }}"
             f"QPushButton:hover {{ color: {_TEXT_PRIMARY}; }}"
         )
-        close_btn.clicked.connect(self.reject)
-        close_row.addWidget(close_btn)
-        root.addLayout(close_row)
-        root.addSpacing(4)
+        self._close_btn.clicked.connect(self.reject)
+        self._close_btn.raise_()
 
         # ── Logo + 标题区 ──
         root.addLayout(self._build_header())
-        root.addSpacing(32)
+        root.addSpacing(16)
 
         # ── 用户名 ──
         lbl_user = QLabel("用户名")
@@ -353,6 +348,7 @@ class LoginWindow(QDialog):
         root.addWidget(self._login_btn)
 
         root.addStretch()
+        root.addSpacing(14)
 
         # ── 版本号 ──
         ver = QLabel(f"v{self._app_version} · {self._game_name}专用版")
@@ -372,14 +368,16 @@ class LoginWindow(QDialog):
 
         title = QLabel("蜂巢·大圣")
         title.setObjectName("title")
+        title.setFixedHeight(26)
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         subtitle = QLabel(f"PC 中控  ·  {self._game_name}")
         subtitle.setObjectName("subtitle")
+        subtitle.setFixedHeight(18)
         subtitle.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         layout.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignHCenter)
-        layout.addSpacing(14)
+        layout.addSpacing(18)
         layout.addWidget(title)
         layout.addSpacing(6)
         layout.addWidget(subtitle)

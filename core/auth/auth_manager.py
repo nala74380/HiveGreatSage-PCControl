@@ -119,6 +119,10 @@ class AuthManager:
             except Exception as e:
                 logger.debug("删除系统凭据失败或凭据不存在: %s", e)
 
+    def forget_saved_credentials(self) -> None:
+        """清除记住的登录账号密码，用于切换账号。"""
+        self._clear_saved_credentials()
+
     def _cleanup_legacy_saved_password(self) -> None:
         if self._config.get("auth.saved_password", None) is None:
             return

@@ -170,8 +170,8 @@ def test_device_info_from_api_basic():
     }
     dev = DeviceInfo.from_api(raw)
     assert dev.device_id == "A-001"
-    assert dev.connection_type == "usb"
-    assert dev.connection_label == "SN:TEST1234"
+    assert dev.connection_type == ""
+    assert dev.connection_label == ""
     assert dev.api_status     == "running"
     assert dev.task           == "日常任务"
     assert dev.level          == 55

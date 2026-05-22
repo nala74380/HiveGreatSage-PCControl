@@ -21,6 +21,13 @@ server:
   timeout: 15
   max_retries: 3
 
+auth:
+  auto_login_enabled: false
+
+runtime:
+  restart_on_crash: false
+  restart_delay_seconds: 5
+
 # 调试配置。
 # 说明：
 #   - allow_mock_fallback 默认为 false，生产环境严禁自动显示模拟设备。

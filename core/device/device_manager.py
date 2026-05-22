@@ -108,7 +108,7 @@ class DeviceManager:
         logger.debug(
             "设备列表拉取完成: %d 台 (在线 %d, ADB映射 %d)",
             len(devices),
-            sum(1 for d in devices if d.is_online),
+            sum(1 for d in devices if d.display_status_key == "online"),
             sum(1 for d in devices if d.adb_connected),
         )
         return devices

@@ -64,7 +64,12 @@ class TeamManager:
 
     def start(self) -> bool:
         """启动 WS 服务端。登录成功后由 app 调用。"""
-        return self.ws_server.start()
+        ok = self.ws_server.start()
+        if ok:
+            logger.info("TeamManager: WS 服务已启动 %s", self.listen_address)
+        else:
+            logger.error("TeamManager: WS 服务启动失败")
+        return ok
 
     def stop(self) -> None:
         self.ws_server.stop()

@@ -144,6 +144,18 @@ def test_clear_saved_credentials_removes_username_password_and_keyring(mock_conf
     delete_password.assert_called_once_with("HiveGreatSage-PCControl", "admin")
 
 
+def test_forget_saved_credentials_is_public_switch_account_entry(mock_config):
+    from core.auth.auth_manager import AuthManager
+
+    mock_config._test_data["auth.saved_username"] = "admin"
+    with patch("core.auth.auth_manager.keyring.delete_password") as delete_password:
+        mgr = AuthManager(mock_config)
+        mgr.forget_saved_credentials()
+
+    assert mock_config._test_data["auth.saved_username"] == ""
+    delete_password.assert_called_once_with("HiveGreatSage-PCControl", "admin")
+
+
 def test_init_cleans_legacy_saved_password(mock_config):
     from core.auth.auth_manager import AuthManager
 

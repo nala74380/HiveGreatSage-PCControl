@@ -262,6 +262,32 @@ class AccountSettingsPage(QWidget):
             remark=self._remark.text().strip(),
         )
 
+    def to_dict(self) -> dict:
+        return self.draft().to_dict()
+
+    def from_dict(self, data: dict | None) -> None:
+        if not data:
+            return
+        self._set_combo_data(self._enabled_combo, data.get("enabled"))
+        self._set_combo_data(self._account_source, data.get("source"))
+        self._set_combo_data(self._account_type, data.get("account_type"))
+        self._game_account.setText(str(data.get("account") or ""))
+        self._game_email.setText(str(data.get("email") or ""))
+        self._game_region.setText(str(data.get("region_big") or ""))
+        self._game_sub_region.setText(str(data.get("region_small") or ""))
+        self._main_role.setText(str(data.get("main_role") or ""))
+        self._profession.setText(str(data.get("profession") or ""))
+        self._last_login_at.setText(str(data.get("last_login_at") or ""))
+        self._last_email_verify_at.setText(str(data.get("last_email_verify_at") or ""))
+        self._set_combo_data(self._account_status, data.get("account_status"))
+        self._remark.setText(str(data.get("remark") or ""))
+
+    @staticmethod
+    def _set_combo_data(combo: QComboBox, value) -> None:
+        idx = combo.findData(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
     def real_password(self) -> str:
         """
         返回游戏真实密码。

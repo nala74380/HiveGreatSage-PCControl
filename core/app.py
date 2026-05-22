@@ -106,13 +106,14 @@ class Application:
 
         # ── 主窗口（延迟创建）────────────────────────────────
         self._main_window = None
+        self._switch_old_window = None
         self._pending_mock_fallback_message: str | None = None
         self._runtime_started = False
 
     # ─────────────────────────────────────────────────────
     def run(self) -> int:
         # 1. 登录
-        if not self._do_login():
+        if not self._try_auto_login() and not self._do_login():
             logger.info("用户取消登录，退出")
             return 0
 
@@ -182,8 +183,14 @@ class Application:
         self.sync_manager.worker.token_expired.connect(self._on_token_expired)
         self.sync_manager.worker.mock_fallback_used.connect(self._on_mock_fallback_used)
         self.sync_manager.start()
-        self.team_manager.start()
+        ws_started = self.team_manager.start()
+        if not ws_started:
+            self.post_status("WS 服务启动失败，请检查 PySide6-Addons 或端口占用。", level="error", timeout_ms=8000)
+            logger.error("WS 服务启动失败，运行期未标记为完全启动")
+            return
+
         self._runtime_started = True
+        self.post_status(f"WS 服务已启动：{self.team_manager.listen_address}", level="ok", timeout_ms=5000)
 
     def _stop_runtime_services(self) -> None:
         if self.sync_manager is not None:
@@ -193,6 +200,26 @@ class Application:
         self._runtime_started = False
 
     # ─────────────────────────────────────────────────────
+    def _try_auto_login(self) -> bool:
+        if not bool(self.config.get("auth.auto_login_enabled", False)):
+            return False
+
+        username = self.auth.get_saved_username()
+        password = self.auth.get_saved_password(username)
+        if not username or not password:
+            logger.info("自动登录未执行：未找到已保存账号或系统凭据")
+            return False
+
+        logger.info("尝试自动登录: %s", username)
+        result = self.auth.login(username, password, remember=True)
+        if not result.success:
+            logger.warning("自动登录失败: %s", result.error_message)
+            return False
+
+        self._refresh_network_config_after_login()
+        logger.info("自动登录成功: %s", username)
+        return True
+
     def _do_login(self) -> bool:
         from ui.login_window import LoginWindow
 
@@ -204,6 +231,28 @@ class Application:
 
         self._refresh_network_config_after_login()
         return True
+
+    def switch_account(self) -> None:
+        """切换账号：关闭自动登录并清除已保存凭据，再重新进入登录流程。"""
+        logger.info("用户请求切换账号")
+        self.config.set_local("auth.auto_login_enabled", False)
+        self.auth.forget_saved_credentials()
+        self.auth.logout()
+        self._stop_runtime_services()
+
+        old_window = self._main_window
+        if old_window is not None:
+            old_window.hide()
+        self._switch_old_window = old_window
+        self._main_window = None
+
+        if self._do_login():
+            if self.config.get("update.check_on_startup", True):
+                self._start_update_check()
+            else:
+                self._enter_main_runtime()
+        else:
+            self._qt_app.quit()
 
     def _refresh_network_config_after_login(self) -> None:
         """
@@ -303,7 +352,16 @@ class Application:
 
         self._main_window = MainWindow(self)
         self._main_window.show()
+        if self._switch_old_window is not None:
+            self._switch_old_window.close()
+            self._switch_old_window = None
         logger.info("主窗口已显示")
+
+    def post_status(self, text: str, level: str = "info", timeout_ms: int = 3500) -> None:
+        if self._main_window is not None and hasattr(self._main_window, "post_status"):
+            self._main_window.post_status(text, level=level, timeout_ms=timeout_ms)
+        else:
+            logger.info("状态消息[%s]: %s", level, text)
 
     def _on_token_expired(self) -> None:
         """
@@ -328,7 +386,7 @@ class Application:
             "登录状态已过期，请重新登录。",
         )
 
-        if self._do_login():
+        if self._try_auto_login() or self._do_login():
             if self.sync_manager is not None:
                 self.sync_manager.start()
         else:

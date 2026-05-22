@@ -241,6 +241,7 @@ class DeviceSettingsDialog(QDialog):
         close_footer_btn.clicked.connect(self.accept)
         footer_lay.addWidget(close_footer_btn)
         root.addWidget(footer)
+        self._load_saved_draft()
 
     # ── ADB Link ──────────────────────────────────
 
@@ -439,15 +440,15 @@ class DeviceSettingsDialog(QDialog):
             "remote_version": None,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "note": "P4 本地草稿；不是最终真相源；后端配置接口待联调；真实密码不写入普通草稿。",
-            "main_settings": self._main_page.draft(),
-            "account_settings": self._account_page.draft().to_dict(),
-            "task_settings": self._task_page.draft(),
-            "item_processing": self._item_page.draft(),
-            "purchase_settings": self._purchase_page.draft(),
-            "trade_settings": self._trade_page.draft(),
-            "craft_settings": self._craft_page.draft(),
-            "mint_settings": self._mint_page.draft(),
-            "misc_settings": self._misc_page.draft(),
+            "main_settings": self._page_to_dict(self._main_page),
+            "account_settings": self._page_to_dict(self._account_page),
+            "task_settings": self._page_to_dict(self._task_page),
+            "item_processing": self._page_to_dict(self._item_page),
+            "purchase_settings": self._page_to_dict(self._purchase_page),
+            "trade_settings": self._page_to_dict(self._trade_page),
+            "craft_settings": self._page_to_dict(self._craft_page),
+            "mint_settings": self._page_to_dict(self._mint_page),
+            "misc_settings": self._page_to_dict(self._misc_page),
         }
         path = self._draft_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -460,6 +461,46 @@ class DeviceSettingsDialog(QDialog):
         device_key = _device_key(self._device)
         safe_device_id = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in device_key)
         return Path.home() / ".hive_greatsage" / "pccontrol" / "profiles" / "device" / f"{safe_device_id}.json"
+
+    def _load_saved_draft(self) -> None:
+        path = self._draft_path()
+        if not path.exists():
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                draft = json.load(f)
+        except Exception as exc:
+            logger.warning("设备设置草稿读取失败: %s", exc)
+            self._status("本地草稿读取失败，已使用页面默认值。", ok=False)
+            return
+
+        for key, page in {
+            "main_settings": self._main_page,
+            "account_settings": self._account_page,
+            "task_settings": self._task_page,
+            "item_processing": self._item_page,
+            "purchase_settings": self._purchase_page,
+            "trade_settings": self._trade_page,
+            "craft_settings": self._craft_page,
+            "mint_settings": self._mint_page,
+            "misc_settings": self._misc_page,
+        }.items():
+            loader = getattr(page, "from_dict", None)
+            if callable(loader):
+                loader(draft.get(key) or {})
+        self._status(f"已载入本地草稿：{path}", ok=True)
+
+    @staticmethod
+    def _page_to_dict(page: QWidget) -> dict:
+        serializer = getattr(page, "to_dict", None)
+        if callable(serializer):
+            return serializer()
+        draft = getattr(page, "draft", None)
+        if not callable(draft):
+            return {}
+        payload = draft()
+        to_dict = getattr(payload, "to_dict", None)
+        return to_dict() if callable(to_dict) else payload
 
     # ── Helpers ───────────────────────────────────
 
@@ -495,3 +536,5 @@ class DeviceSettingsDialog(QDialog):
     def _status(self, text: str, ok: bool = False) -> None:
         self._status_label.setText(text)
         self._status_label.setStyleSheet(f"color:{TEAL if ok else TEXT_MUTE}; font-size:10px;")
+        if hasattr(self._app, "post_status"):
+            self._app.post_status(text, level="ok" if ok else "info")

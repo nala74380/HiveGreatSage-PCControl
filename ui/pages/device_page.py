@@ -18,7 +18,9 @@ r"""
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -63,12 +65,18 @@ C_TEXT_MID = "#53657D"
 C_TEXT_DIM = "#7B8BA0"
 C_TEXT_MUTE = "#9AABBF"
 
-_DEV_COLS = ["", "编号", "连接标识", "角色", "状态", "激活", "当前任务", "等级", "战力", "区服", "心跳", "备注"]
+_DEV_COLS = ["", "编号", "角色", "当前任务", "等级", "战力", "区服", "心跳", "备注"]
+_PREF_FILE = Path.home() / ".hive_greatsage" / "pccontrol" / "device_table_prefs.json"
+_LOCKED_COLS = {0, 1}
+_COLUMN_PRESETS = {
+    "basic": {0, 1, 7},
+    "runtime": {0, 1, 2, 3, 6, 7, 8},
+    "full": set(range(len(_DEV_COLS))),
+}
 _STATUS_MAP = {
-    "running": (C_TEAL_BG2, C_TEAL, "运行中"),
-    "idle": (C_BG_ITEM, C_TEXT_MID, "在线"),
+    "online": (C_TEAL_BG2, C_TEAL, "在线"),
+    "offline": ("#FFF4E6", "#F08C00", "离线"),
     "error": (C_RED_BG, C_RED, "异常"),
-    "offline": (C_BG_ITEM, C_TEXT_DIM, "离线"),
 }
 _ROLE_MAP = {
     "captain": ("#26215C", "#AFA9EC", "队长"),
@@ -99,11 +107,15 @@ def _device_key(dev: DeviceInfo) -> str:
 
 
 def _connection_text(dev: DeviceInfo) -> str:
-    return dev.connection_label or "—"
+    if dev.connection_label:
+        return dev.connection_label
+    if dev.heartbeat_online:
+        return "远程心跳"
+    return "未连接"
 
 
 def _is_normal_android_status(dev: DeviceInfo) -> bool:
-    return (dev.api_status or "").strip().lower() in {"idle", "running"}
+    return dev.heartbeat_online
 
 
 def _needs_activation_command(dev: DeviceInfo) -> bool:
@@ -136,6 +148,7 @@ class DevicePage(QWidget):
         self._row_devices: list[DeviceInfo] = []
         self._activate_workers: list[ActivateWorker] = []
         self._team_events_connected = False
+        self._table_prefs = self._load_table_prefs()
         self._build()
         self._connect_team_events()
         self._refresh_lan_members(update_links=False)
@@ -180,7 +193,7 @@ class DevicePage(QWidget):
 
         self._f_status = QComboBox()
         self._f_status.setFixedHeight(26)
-        for text in ["全部状态", "运行中", "在线", "离线", "异常"]:
+        for text in ["全部状态", "在线", "离线", "异常"]:
             self._f_status.addItem(text)
         self._f_status.currentIndexChanged.connect(self._apply_filters)
         fl.addWidget(self._f_status)
@@ -235,13 +248,15 @@ class DevicePage(QWidget):
         table.itemSelectionChanged.connect(self._update_selection_summary)
 
         hdr = table.horizontalHeader()
-        col_widths = [36, 80, 140, 70, 80, 65, 0, 65, 90, 55, 90, 110]
-        for i, width in enumerate(col_widths):
-            if width == 0:
-                hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            else:
-                hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-                table.setColumnWidth(i, width)
+        hdr.setMinimumSectionSize(36)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hdr.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        hdr.customContextMenuRequested.connect(self._show_header_menu)
+        table.setColumnWidth(0, 36)
+        self._table = table
+        self._apply_table_prefs(save=False)
         return table
 
     def _connect_bottom_toolbar(self) -> None:
@@ -249,8 +264,8 @@ class DevicePage(QWidget):
         tb.toggle_all_requested.connect(self._set_all_checked)
         tb.invert_selection_requested.connect(self._invert_selection)
         tb.clear_selection_requested.connect(self._clear_selection)
-        tb.select_online_requested.connect(lambda: self._select_by_predicate(lambda d: d.is_online))
-        tb.select_error_requested.connect(lambda: self._select_by_predicate(lambda d: d.api_status == "error"))
+        tb.select_online_requested.connect(lambda: self._select_by_predicate(lambda d: d.display_status_key == "online"))
+        tb.select_error_requested.connect(lambda: self._select_by_predicate(lambda d: d.display_status_key == "error"))
         tb.batch_settings_requested.connect(self._open_batch_dialog)
         tb.batch_start_requested.connect(lambda: self._phase_hint("批量启动"))
         tb.batch_stop_requested.connect(lambda: self._phase_hint("批量停止"))
@@ -293,7 +308,7 @@ class DevicePage(QWidget):
         search = self._f_search.text().strip().lower()
         status_text = self._f_status.currentText()
         role_text = self._f_role.currentText()
-        status_map = {"运行中": "running", "在线": "idle", "离线": "offline", "异常": "error"}
+        status_map = {"在线": "online", "离线": "offline", "异常": "error"}
         role_map = {"队长": "captain", "战力号": "power", "打工号": "farmer", "新号": "newbie"}
 
         filtered = [
@@ -303,7 +318,7 @@ class DevicePage(QWidget):
                 or search in _connection_text(d).lower()
                 or search in d.device_id.lower()
                 or search in d.server.lower())
-            and (status_text == "全部状态" or d.api_status == status_map.get(status_text, ""))
+            and (status_text == "全部状态" or d.display_status_key == status_map.get(status_text, ""))
             and (role_text == "全部角色" or d.role == role_map.get(role_text, ""))
         ]
         self._visible_devices = filtered
@@ -316,7 +331,7 @@ class DevicePage(QWidget):
         self._row_devices = list(devices)
         self._table.setRowCount(len(devices))
         for row, dev in enumerate(devices):
-            self._table.setRowHeight(row, 40)
+            self._table.setRowHeight(row, 58)
 
             chk_w = QWidget()
             chk = QCheckBox()
@@ -327,35 +342,24 @@ class DevicePage(QWidget):
             cl.setContentsMargins(0, 0, 0, 0)
             self._table.setCellWidget(row, 0, chk_w)
 
-            self._table.setItem(row, 1, self._item(dev.display_id, C_TEXT))
-            self._table.setItem(row, 2, self._item(_connection_text(dev), C_TEXT_MID))
+            self._set_device_summary_cell(row, 1, dev)
 
             if dev.role in _ROLE_MAP:
                 bg, fg, text = _ROLE_MAP[dev.role]
-                self._set_badge_cell(row, 3, text, bg, fg)
+                self._set_badge_cell(row, 2, text, bg, fg)
             else:
-                self._table.setItem(row, 3, self._item("—", C_TEXT_MUTE))
+                self._table.setItem(row, 2, self._item("—", C_TEXT_MUTE))
 
-            st = dev.api_status or "offline"
-            if st in _STATUS_MAP:
-                bg, fg, text = _STATUS_MAP[st]
-                self._set_badge_cell(row, 4, text, bg, fg)
+            self._table.setItem(row, 3, self._item(dev.task or "—", C_TEXT_MID))
+            self._table.setItem(row, 4, self._item(f"Lv.{dev.level}" if dev.level else "—", C_TEXT, Qt.AlignmentFlag.AlignCenter))
+            self._table.setItem(row, 5, self._item(f"{dev.combat_power:,}" if dev.combat_power else "—", C_TEXT2, Qt.AlignmentFlag.AlignCenter))
+            self._table.setItem(row, 6, self._item(dev.server or "—", C_TEXT_MID, Qt.AlignmentFlag.AlignCenter))
+            self._table.setItem(row, 7, self._item(dev.heartbeat_str, C_TEXT_MID))
+            self._table.setItem(row, 8, self._item(dev.note, C_TEXT_DIM))
 
-            act_text = "已激活" if dev.activated else "未激活"
-            self._set_badge_cell(
-                row, 5, act_text,
-                C_TEAL_BG2 if dev.activated else C_BG_ITEM,
-                C_TEAL if dev.activated else C_TEXT_DIM,
-            )
+        self._auto_resize_columns()
 
-            self._table.setItem(row, 6, self._item(dev.task or "—", C_TEXT_MID))
-            self._table.setItem(row, 7, self._item(f"Lv.{dev.level}" if dev.level else "—", C_TEXT, Qt.AlignmentFlag.AlignCenter))
-            self._table.setItem(row, 8, self._item(f"{dev.combat_power:,}" if dev.combat_power else "—", C_TEXT2, Qt.AlignmentFlag.AlignCenter))
-            self._table.setItem(row, 9, self._item(dev.server or "—", C_TEXT_MID, Qt.AlignmentFlag.AlignCenter))
-            self._table.setItem(row, 10, self._item(dev.heartbeat_str, C_TEXT_MID))
-            self._table.setItem(row, 11, self._item(dev.note, C_TEXT_DIM))
-
-        online = sum(1 for d in self._devices if d.is_online)
+        online = sum(1 for d in self._devices if d.display_status_key == "online")
         win = self.window()
         if hasattr(win, "update_stats"):
             win.update_stats(len(self._devices), online)
@@ -443,6 +447,38 @@ class DevicePage(QWidget):
         elif chosen in (act_start, act_stop, act_restart):
             self._phase_hint(chosen.text().strip())
 
+    def _show_header_menu(self, pos) -> None:
+        header = self._table.horizontalHeader()
+        menu = QMenu(self)
+        menu.addSection("列显示")
+        for col, label in enumerate(_DEV_COLS):
+            title = label or "选择框"
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(not self._table.isColumnHidden(col))
+            action.setEnabled(col not in _LOCKED_COLS)
+            action.triggered.connect(lambda checked, c=col: self._set_column_visible(c, checked))
+
+        menu.addSeparator()
+        menu.addSection("列组预设")
+        basic = menu.addAction("基础视图：编号 + 状态 + 心跳")
+        basic.triggered.connect(lambda: self._apply_column_preset("basic"))
+        runtime = menu.addAction("运行视图：编号 + 角色 + 任务 + 区服 + 心跳 + 备注")
+        runtime.triggered.connect(lambda: self._apply_column_preset("runtime"))
+        full = menu.addAction("完整视图：显示全部列")
+        full.triggered.connect(lambda: self._apply_column_preset("full"))
+
+        menu.addSeparator()
+        auto_fit = menu.addAction("自动列宽")
+        auto_fit.setCheckable(True)
+        auto_fit.setChecked(bool(self._table_prefs.get("auto_fit", True)))
+        auto_fit.triggered.connect(self._set_auto_fit_columns)
+        save_widths = menu.addAction("保存当前列宽")
+        save_widths.triggered.connect(self._save_current_column_widths)
+        reset = menu.addAction("重置表格偏好")
+        reset.triggered.connect(self._reset_table_prefs)
+        menu.exec(header.viewport().mapToGlobal(pos))
+
     def _open_batch_dialog(self) -> None:
         selected = self._get_selected_devices()
         if not selected:
@@ -482,6 +518,14 @@ class DevicePage(QWidget):
             QMessageBox.information(self, "无需激活", f"设备 {dev.display_id} 状态正常，已视为激活。")
             return
 
+        if not dev.adb_serial:
+            QMessageBox.warning(
+                self,
+                "激活失败",
+                f"设备 {dev.display_id} 当前不在本机 ADB 可控范围内，无法下发激活命令。",
+            )
+            return
+
         if not _needs_activation_command(dev):
             QMessageBox.warning(
                 self,
@@ -490,9 +534,6 @@ class DevicePage(QWidget):
             )
             return
 
-        if not dev.adb_serial:
-            QMessageBox.warning(self, "激活失败", f"设备 {dev.display_id} 未通过 ADB 连接。")
-            return
         worker = ActivateWorker(self._app.adb, dev.adb_serial)
         worker.finished.connect(self._on_activate_done)
         self._activate_workers.append(worker)
@@ -520,7 +561,10 @@ class DevicePage(QWidget):
             self._apply_filters()
 
     def _phase_hint(self, action_name: str) -> None:
-        QMessageBox.information(self, "待实现", f"{action_name} 属于后续批量操作实现范围，当前仅完成布局与入口重构。")
+        msg = f"{action_name} 属于后续批量操作实现范围，当前仅完成布局与入口重构。"
+        if hasattr(self._app, "post_status"):
+            self._app.post_status(msg, level="warn")
+        QMessageBox.information(self, "待实现", msg)
 
     # ── 选择操作 ──────────────────────────────────
 
@@ -583,6 +627,165 @@ class DevicePage(QWidget):
         if 0 <= row < len(self._row_devices):
             return self._row_devices[row]
         return None
+
+    def _set_device_summary_cell(self, row: int, col: int, dev: DeviceInfo) -> None:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(3)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(5)
+        top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        device_id = QLabel(dev.display_id)
+        device_id.setStyleSheet(f"color:{C_TEXT}; font-size:13px; font-weight:700;")
+        top.addWidget(device_id)
+
+        status_bg, status_fg, status_text = _STATUS_MAP.get(
+            dev.display_status_key,
+            (C_BG_ITEM, C_TEXT_DIM, dev.display_status_key or "未知"),
+        )
+        status_badge = _badge(status_text, status_bg, status_fg, 10)
+        status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(status_badge)
+
+        active_text = "已激活" if dev.activated else "未激活"
+        active_badge = _badge(
+            active_text,
+            C_TEAL_BG2 if dev.activated else C_BG_ITEM,
+            C_TEAL if dev.activated else C_TEXT_DIM,
+            10,
+        )
+        active_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(active_badge)
+
+        conn = QLabel(_connection_text(dev))
+        conn.setStyleSheet(f"color:{C_TEXT_DIM}; font-size:11px;")
+        conn.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        layout.addLayout(top)
+        layout.addWidget(conn)
+        self._table.setCellWidget(row, col, widget)
+
+    def _auto_resize_columns(self) -> None:
+        self._table.setColumnWidth(0, 36)
+        if not bool(self._table_prefs.get("auto_fit", True)):
+            widths = self._table_prefs.get("widths") or {}
+            for col_key, width in widths.items():
+                try:
+                    col = int(col_key)
+                    if 0 <= col < self._table.columnCount():
+                        self._table.setColumnWidth(col, int(width))
+                except (TypeError, ValueError):
+                    continue
+            return
+
+        summary_width = self._table.horizontalHeader().sectionSizeHint(1)
+        for row in range(self._table.rowCount()):
+            widget = self._table.cellWidget(row, 1)
+            if widget is not None:
+                summary_width = max(summary_width, widget.sizeHint().width() + 8)
+        self._table.setColumnWidth(1, min(max(summary_width, 118), 220))
+
+        for col in (2, 4, 5, 6, 7, 8):
+            self._table.resizeColumnToContents(col)
+            self._table.setColumnWidth(col, min(max(self._table.columnWidth(col), 52), 140))
+        self._apply_table_prefs(save=False)
+
+    def _set_column_visible(self, col: int, visible: bool) -> None:
+        if col in _LOCKED_COLS:
+            return
+        self._table.setColumnHidden(col, not visible)
+        visible_cols = set(self._table_prefs.get("visible_columns") or range(len(_DEV_COLS)))
+        if visible:
+            visible_cols.add(col)
+        else:
+            visible_cols.discard(col)
+        visible_cols.update(_LOCKED_COLS)
+        self._table_prefs["visible_columns"] = sorted(visible_cols)
+        self._table_prefs["preset"] = "custom"
+        self._save_table_prefs()
+
+    def _apply_column_preset(self, preset: str) -> None:
+        visible_cols = set(_COLUMN_PRESETS.get(preset, _COLUMN_PRESETS["full"]))
+        visible_cols.update(_LOCKED_COLS)
+        self._table_prefs["visible_columns"] = sorted(visible_cols)
+        self._table_prefs["preset"] = preset
+        self._apply_table_prefs(save=True)
+        if hasattr(self._app, "post_status"):
+            self._app.post_status(f"设备表已切换到 {preset} 列组。", level="info")
+
+    def _set_auto_fit_columns(self, enabled: bool) -> None:
+        self._table_prefs["auto_fit"] = bool(enabled)
+        self._save_table_prefs()
+        self._auto_resize_columns()
+
+    def _save_current_column_widths(self) -> None:
+        self._table_prefs["auto_fit"] = False
+        self._table_prefs["widths"] = {
+            str(col): self._table.columnWidth(col)
+            for col in range(self._table.columnCount())
+        }
+        self._save_table_prefs()
+        if hasattr(self._app, "post_status"):
+            self._app.post_status("设备表当前列宽已保存。", level="ok")
+
+    def _reset_table_prefs(self) -> None:
+        self._table_prefs = self._default_table_prefs()
+        self._apply_table_prefs(save=True)
+        self._auto_resize_columns()
+        if hasattr(self._app, "post_status"):
+            self._app.post_status("设备表偏好已重置。", level="ok")
+
+    def _apply_table_prefs(self, save: bool) -> None:
+        if not hasattr(self, "_table"):
+            return
+        visible_cols = set(self._table_prefs.get("visible_columns") or range(len(_DEV_COLS)))
+        visible_cols.update(_LOCKED_COLS)
+        for col in range(self._table.columnCount()):
+            self._table.setColumnHidden(col, col not in visible_cols)
+        if not bool(self._table_prefs.get("auto_fit", True)):
+            for col_key, width in (self._table_prefs.get("widths") or {}).items():
+                try:
+                    col = int(col_key)
+                    if 0 <= col < self._table.columnCount():
+                        self._table.setColumnWidth(col, int(width))
+                except (TypeError, ValueError):
+                    continue
+        if save:
+            self._save_table_prefs()
+
+    @staticmethod
+    def _default_table_prefs() -> dict:
+        return {
+            "preset": "full",
+            "auto_fit": True,
+            "visible_columns": list(range(len(_DEV_COLS))),
+            "widths": {},
+        }
+
+    def _load_table_prefs(self) -> dict:
+        if not _PREF_FILE.exists():
+            return self._default_table_prefs()
+        try:
+            with open(_PREF_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as exc:
+            logger.warning("读取设备表偏好失败: %s", exc)
+            return self._default_table_prefs()
+        prefs = self._default_table_prefs()
+        prefs.update({k: data.get(k, prefs[k]) for k in prefs})
+        return prefs
+
+    def _save_table_prefs(self) -> None:
+        try:
+            _PREF_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(_PREF_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._table_prefs, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.warning("保存设备表偏好失败: %s", exc)
 
     @staticmethod
     def _item(

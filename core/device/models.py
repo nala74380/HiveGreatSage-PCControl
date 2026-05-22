@@ -66,6 +66,64 @@ class DeviceInfo:
     def is_activated_status(status: str) -> bool:
         return (status or "").strip().lower() in {"idle", "running"}
 
+    @staticmethod
+    def _as_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "online"}
+        return False
+
+    @property
+    def heartbeat_online(self) -> bool:
+        """安卓端心跳正常才视为在线；列表在线状态以 Verify 的 is_online 为准。"""
+        status = (self.api_status or "").strip().lower()
+        if status in {"offline", "error", "abnormal"}:
+            return False
+        return self._as_bool(self.is_online)
+
+    @property
+    def account_blocked(self) -> bool:
+        """从游戏数据中识别明确封号状态；没有上报该字段时不主动猜测。"""
+        data = self.game_data or {}
+        block_keys = {
+            "account_status",
+            "account_state",
+            "ban_status",
+            "blocked",
+            "banned",
+            "is_banned",
+        }
+        block_values = {"ban", "banned", "blocked", "封号", "封禁", "冻结"}
+        for key in block_keys:
+            value = data.get(key)
+            if isinstance(value, bool) and value:
+                return True
+            text = str(value or "").strip().lower()
+            if text in block_values or "封号" in text or "封禁" in text:
+                return True
+        return False
+
+    @property
+    def display_status_key(self) -> str:
+        """
+        PC 中控前台唯一三态：
+        online  = 安卓端正常运行，心跳正常。
+        offline = 安卓端未运行，心跳不正常。
+        error   = 游戏数据明确上报封号/异常，或后端状态明确为异常。
+
+        注意：ADB/LAN 只代表“这台 PC 能否本地控制设备”，不能决定设备是否在线。
+        设备不在本机局域网但心跳正常时，仍然是在线；只是在连接标识中显示为远程心跳。
+        """
+        status = (self.api_status or "").strip().lower()
+        if self.account_blocked or status in {"error", "abnormal"}:
+            return "error"
+        if self.heartbeat_online:
+            return "online"
+        return "offline"
+
     @property
     def display_id(self) -> str:
         return self.device_id or "—"
@@ -110,7 +168,7 @@ class DeviceInfo:
             api_status=api_status,
             last_seen=last_seen,
             game_data=game_data,
-            is_online=api_data.get("is_online", False),
+            is_online=cls._as_bool(api_data.get("is_online", False)),
             task=str(game_data.get("task", "")),
             level=int(game_data.get("level", 0) or 0),
             combat_power=int(game_data.get("combat_power", 0) or 0),
