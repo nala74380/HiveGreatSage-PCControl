@@ -555,8 +555,11 @@ class DevicePage(QWidget):
         self._activate_workers = [w for w in self._activate_workers if w.isRunning()]
 
     def _request_refresh(self) -> None:
-        if hasattr(self._app, "sync_manager") and hasattr(self._app.sync_manager, "worker"):
-            QMessageBox.information(self, "刷新", "当前由同步线程自动刷新；立即刷新将在后续同步接口中实现。")
+        sync_manager = getattr(self._app, "sync_manager", None)
+        if sync_manager is not None and sync_manager.is_running:
+            sync_manager.request_immediate_sync()
+            if hasattr(self._app, "post_status"):
+                self._app.post_status("已请求立即同步...", level="info", timeout_ms=2000)
         else:
             self._apply_filters()
 

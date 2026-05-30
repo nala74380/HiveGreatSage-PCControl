@@ -3,11 +3,14 @@ r"""
 名称: 应用生命周期管理
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-18
-版本: V1.3.0
+版本: V1.4.0
 功能及相关说明:
   Application 类，管理 QApplication 创建、配置加载、模块初始化和主流程调度。
 
 改进内容:
+  V1.4.0 (2026-05-23)
+    - 信号连接改为走 SyncManager 代理信号，不再直接引用 worker。
+    - _fetch_user_info_async 移入 QThread，避免主线程阻塞 HTTP。
   V1.3.0 (2026-05-18)
     - 初始化 AdbLinkManager。
     - DeviceManager 改为注入 AdbLinkManager，不再直接接收 AdbManager。
@@ -180,8 +183,8 @@ class Application:
             logger.error("运行期管理器初始化失败，无法启动同步服务")
             return
 
-        self.sync_manager.worker.token_expired.connect(self._on_token_expired)
-        self.sync_manager.worker.mock_fallback_used.connect(self._on_mock_fallback_used)
+        self.sync_manager.token_expired.connect(self._on_token_expired)
+        self.sync_manager.mock_fallback_used.connect(self._on_mock_fallback_used)
         self.sync_manager.start()
         ws_started = self.team_manager.start()
         if not ws_started:
@@ -337,15 +340,33 @@ class Application:
         self._download_worker = downloader
 
     def _fetch_user_info_async(self) -> None:
-        """后台拉取 /api/auth/me，更新主窗口顶部授权统计。"""
+        """后台线程拉取 /api/auth/me，完成后在主线程更新顶部授权统计。"""
         if not self._main_window:
             return
-        try:
-            self.auth.fetch_user_info()
-            if hasattr(self._main_window, 'update_auth_stats'):
-                self._main_window.update_auth_stats()
-        except Exception as e:
-            logger.warning("后台拉取用户信息失败: %s", e)
+
+        from PySide6.QtCore import QThread, Signal
+
+        class _FetchWorker(QThread):
+            done = Signal()
+
+            def __init__(self, auth):
+                super().__init__()
+                self._auth = auth
+
+            def run(self):
+                try:
+                    self._auth.fetch_user_info()
+                except Exception as e:
+                    logger.warning("后台拉取用户信息失败: %s", e)
+                self.done.emit()
+
+        self._fetch_worker = _FetchWorker(self.auth)
+        self._fetch_worker.done.connect(self._on_user_info_fetched)
+        self._fetch_worker.start()
+
+    def _on_user_info_fetched(self) -> None:
+        if self._main_window and hasattr(self._main_window, "update_auth_stats"):
+            self._main_window.update_auth_stats()
 
     def _show_main_window(self) -> None:
         from ui.main_window import MainWindow

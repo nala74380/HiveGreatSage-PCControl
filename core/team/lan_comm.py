@@ -2,8 +2,8 @@ r"""
 文件位置: core/team/lan_comm.py
 名称: 局域网通信（内网IP检测 + WebSocket 服务端）
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-18
-版本: V1.1.0
+时间: 2026-05-22
+版本: V1.1.1
 功能及相关说明:
   PC 中控局域网通信模块，Phase 3 核心。
   包含两个类：
@@ -21,6 +21,7 @@ r"""
   - peer_ip 只用于 PC 中控本地 LAN 与 TCP ADB 映射辅助判断，不写入 Verify 绑定主键。
 
 改进内容:
+  V1.1.1 (2026-05-22) - 增强 device_id 验证：检查长度、字符合法性，防止注入攻击
   V1.1.0 - 认证成功时把 socket peer_ip 写入 info。
   V1.0.0 - 初始版本
 
@@ -167,11 +168,27 @@ class WSServer(QObject):
         msg_type = data.get("type")
 
         if msg_type == "auth":
-            device_id = str(data.get("device_id", ""))
+            device_id = str(data.get("device_id", "")).strip()
+
+            # 验证device_id格式：不能为空，长度合理
             if not device_id:
                 self._send(sock, {"type": "auth_failed", "reason": "missing_device_id"})
                 sock.close()
                 return
+
+            if len(device_id) > 64:
+                logger.warning("WSServer: device_id过长 len=%d", len(device_id))
+                self._send(sock, {"type": "auth_failed", "reason": "invalid_device_id"})
+                sock.close()
+                return
+
+            # 验证device_id字符：只允许字母、数字、下划线、中划线
+            if not all(c.isalnum() or c in ('_', '-', '.') for c in device_id):
+                logger.warning("WSServer: device_id包含非法字符 device_id=%s", device_id[:16])
+                self._send(sock, {"type": "auth_failed", "reason": "invalid_device_id"})
+                sock.close()
+                return
+
             self._connections[device_id] = sock
             self._sock_to_id[sock] = device_id
             self._send(sock, {"type": "auth_ok"})

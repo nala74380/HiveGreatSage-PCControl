@@ -2,8 +2,8 @@ r"""
 文件位置: core/sync/sync_worker.py
 名称: 数据同步工作线程
 作者: 蜂巢·大圣 (Hive-GreatSage)
-时间: 2026-05-12
-版本: V1.1.0
+时间: 2026-05-22
+版本: V1.2.0
 功能及相关说明:
   在独立 QThread 中每 10 秒向 Verify API 拉取设备列表，
   通过 Signal 将结果传回主线程（UI 层）更新设备表格。
@@ -20,7 +20,13 @@ r"""
     3. 默认还要求 server.api_base_url 指向 127.0.0.1 或 localhost。
     4. 使用 mock fallback 时会 emit mock_fallback_used，UI/日志必须明确提示。
 
+  立即同步：
+    - request_immediate_sync() 设置 _sync_now 标志，主循环在下一个 100ms 检查点
+      跳出等待直接触发同步，由 SyncManager 代理调用，不暴露给 UI 层直接访问。
+
 改进内容:
+  V1.2.0 (2026-05-23) - 新增 request_immediate_sync() + _sync_now 标志，支持 UI 主动触发同步。
+  V1.1.1 (2026-05-22) - 修复：刷新后仍401时清除过期Token，避免下次同步继续使用
   V1.1.0 (2026-05-12) - mock fallback 改为显式配置开关，并增加 mock_fallback_used 信号。
   V1.0.2 (2026-04-28) - _do_sync 改为单一 except + getattr 属性检测，根本解决
                         类身份问题导致的 401 无法捕获；_handle_401 同样修改
@@ -72,6 +78,11 @@ class SyncWorker(QThread):
         self._auth           = auth_manager
         self._interval_sec   = interval_sec
         self._mock_notice_emitted = False
+        self._sync_now       = False
+
+    def request_immediate_sync(self) -> None:
+        """由 SyncManager 代理调用，标记下个等待检查点立即触发同步。线程安全。"""
+        self._sync_now = True
 
     # ── 主循环 ──────────────────────────────────────────────────
 
@@ -79,10 +90,11 @@ class SyncWorker(QThread):
         logger.info("SyncWorker 启动，立即拉取 Verify 设备列表，后续同步间隔 %ds", self._interval_sec)
 
         while not self.isInterruptionRequested():
+            self._sync_now = False
             self._do_sync()
             total_ms = self._interval_sec * 1000
             slept    = 0
-            while slept < total_ms and not self.isInterruptionRequested():
+            while slept < total_ms and not self.isInterruptionRequested() and not self._sync_now:
                 self.msleep(100)
                 slept += 100
 
@@ -150,7 +162,8 @@ class SyncWorker(QThread):
             status_code = getattr(retry_e, "status_code", None)
             if status_code == 401:
                 # 刷新后仍 401：账号被踢出或服务端异常
-                logger.warning("刷新后仍然 401，通知主线程重新登录")
+                logger.warning("刷新后仍然 401，清除Token并通知主线程重新登录")
+                self._auth.clear_tokens()  # 清除过期Token，避免下次同步继续使用
                 self.token_expired.emit()
             elif status_code is not None:
                 detail = getattr(retry_e, "detail", str(retry_e))

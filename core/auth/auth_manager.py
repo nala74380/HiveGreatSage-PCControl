@@ -3,7 +3,7 @@ r"""
 名称: 认证管理器
 作者: 蜂巢·大圣 (Hive-GreatSage)
 时间: 2026-05-17
-版本: V2.2.0
+版本: V2.2.1
 功能及相关说明:
     PC 中控认证管理器。
 
@@ -25,6 +25,7 @@ r"""
       - connection_label = Verify 地址
 
 改进历史:
+    V2.2.1 (2026-05-23) - 新增 clear_tokens()，修复 SyncWorker 刷新后仍401时的 AttributeError。
     V2.2.0 (2026-05-17) - 对齐 Verify 新设备标识契约与 refresh 请求体。
     V2.1.0 (2026-05-12): 使用 keyring 保存记住密码，并清理历史 saved_password 字段。
     V2.0.0 (2026-05-03): 重建被覆盖的文件。
@@ -246,6 +247,18 @@ class AuthManager:
         self._sync_api_token()
         logger.info("Token 刷新成功")
         return True
+
+    def clear_tokens(self) -> None:
+        """清除内存中的 access_token 和 refresh_token。
+
+        用于刷新后仍 401 的情况，避免下次同步继续使用过期 Token。
+        不调用登出 API，不清除 keyring 保存的密码。
+        """
+        self._access_token = None
+        self._refresh_token = None
+        if self._api:
+            self._api.set_token(None)
+        logger.info("Token 已清除（clear_tokens）")
 
     def logout(self) -> None:
         if self._api and self._refresh_token:

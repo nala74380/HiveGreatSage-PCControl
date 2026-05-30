@@ -530,9 +530,8 @@ class MainWindow(QMainWindow):
         sync_manager = getattr(self._app, "sync_manager", None)
         if sync_manager is None:
             return
-        worker = sync_manager.worker
-        worker.devices_updated.connect(self._on_devices_updated)
-        worker.sync_error.connect(self._on_sync_error)
+        sync_manager.devices_updated.connect(self._on_devices_updated)
+        sync_manager.sync_error.connect(self._on_sync_error)
         self._sync_connected = True
 
     def attach_runtime_services(self) -> None:

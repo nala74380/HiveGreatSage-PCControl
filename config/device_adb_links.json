@@ -7,7 +7,7 @@
     "match_method": "lan_ip",
     "match_confidence": "medium",
     "source": "pccontrol_lan",
-    "verified_at": "2026-05-20T16:02:45",
+    "verified_at": "2026-05-23T01:51:46",
     "manual_locked": false,
     "conflict": false,
     "note": "LAN peer_ip 192.168.2.28 matched TCP ADB serial 192.168.2.28:5555"
